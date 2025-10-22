@@ -1,21 +1,12 @@
 use macroquad::prelude::*;
 
-const MOVE_SPEED: f32 = 0.1;
-const LOOK_SPEED: f32 = 0.1;
-
 fn conf() -> Conf {
     Conf {
-        window_title: String::from("Macroquad"),
+        window_title: String::from("JUNGLEBEAST"),
         window_width: 1260,
         window_height: 768,
         fullscreen: false,
         ..Default::default()
-    }
-}
-
-async fn handle_events() {
-    if is_key_down(KeyCode::Space) {
-        println!("hej");
     }
 }
 
@@ -38,77 +29,58 @@ impl Game {
         )
         .normalize();
         let mut right = front.cross(world_up).normalize();
-        let mut up = right.cross(front).normalize();
 
         let mut position = vec3(0.0, 1.0, 0.0);
         let mut last_mouse_position: Vec2 = mouse_position().into();
 
-        let mut grabbed = true;
-        set_cursor_grab(grabbed);
+        let move_speed = 0.1;
+        let look_speed = 0.1;
+
+        set_cursor_grab(true);
         show_mouse(false);
 
         loop {
             let delta = get_frame_time();
 
-            if is_key_pressed(KeyCode::Escape) {
-                break;
-            }
-            if is_key_pressed(KeyCode::Tab) {
-                grabbed = !grabbed;
-                set_cursor_grab(grabbed);
-                show_mouse(!grabbed);
-            }
+            let step_ws = vec3(right.z, right.y, -right.x) * move_speed;
+            let step_ad = right * move_speed;
 
-            if is_key_down(KeyCode::Up) {
-                position += front * MOVE_SPEED;
-            }
-            if is_key_down(KeyCode::Down) {
-                position -= front * MOVE_SPEED;
-            }
-            if is_key_down(KeyCode::Left) {
-                position -= right * MOVE_SPEED;
-            }
-            if is_key_down(KeyCode::Right) {
-                position += right * MOVE_SPEED;
-            }
-
-            handle_events().await;
+            if is_key_down(KeyCode::W) { position += step_ws; }
+            if is_key_down(KeyCode::S) { position -= step_ws; }
+            if is_key_down(KeyCode::A) { position -= step_ad; }
+            if is_key_down(KeyCode::D) { position += step_ad; }
 
             let mouse_position: Vec2 = mouse_position().into();
             let mouse_delta = mouse_position - last_mouse_position;
 
             last_mouse_position = mouse_position;
 
-            if grabbed {
-                yaw += mouse_delta.x * delta * LOOK_SPEED;
-                pitch += mouse_delta.y * delta * -LOOK_SPEED;
+            yaw += mouse_delta.x * delta * look_speed;
+            pitch += mouse_delta.y * delta * -look_speed;
 
-                pitch = if pitch > 1.5 { 1.5 } else { pitch };
-                pitch = if pitch < -1.5 { -1.5 } else { pitch };
+            pitch = if pitch > 1.5 { 1.5 } else { pitch };
+            pitch = if pitch < -1.5 { -1.5 } else { pitch };
 
-                front = vec3(
-                    yaw.cos() * pitch.cos(),
-                    pitch.sin(),
-                    yaw.sin() * pitch.cos(),
-                )
-                .normalize();
+            front = vec3(
+                yaw.cos() * pitch.cos(),
+                pitch.sin(),
+                yaw.sin() * pitch.cos(),
+            )
+            .normalize();
 
-                right = front.cross(world_up).normalize();
-                up = right.cross(front).normalize();
+            right = front.cross(world_up).normalize();
+            let up = right.cross(front).normalize();
 
-                x += if switch { 0.04 } else { -0.04 };
-                if x >= bounds || x <= -bounds {
-                    switch = !switch;
-                }
+            x += if switch { 0.04 } else { -0.04 };
+            if x >= bounds || x <= -bounds {
+                switch = !switch;
             }
 
             clear_background(LIGHTGRAY);
 
-            // Going 3d!
-
             set_camera(&Camera3D {
-                position: position,
-                up: up,
+                position,
+                up,
                 target: position + front,
                 fovy: 90.0,
                 ..Default::default()
@@ -116,35 +88,14 @@ impl Game {
 
             draw_grid(20, 1., BLACK, GRAY);
 
-            // draw_line_3d(
-            //     vec3(x, 0.0, x),
-            //     vec3(5.0, 5.0, 5.0),
-            //     Color::new(1.0, 1.0, 0.0, 1.0),
-            // );
-
-            // draw_cube_wires(vec3(0., 1., -6.), vec3(2., 2., 2.), GREEN);
-            // draw_cube_wires(vec3(0., 1., 6.), vec3(2., 2., 2.), BLUE);
-            // draw_cube_wires(vec3(2., 1., 2.), vec3(2., 2., 2.), RED);
-
-            // Back to screen space, render some text
-
             set_default_camera();
-            draw_text("First Person Camera", 10.0, 20.0, 30.0, BLACK);
 
-            draw_text(
-                format!("X: {} Y: {}", mouse_position.x, mouse_position.y).as_str(),
-                10.0,
-                48.0 + 18.0,
-                30.0,
-                BLACK,
-            );
-            draw_text(
-                format!("Press <TAB> to toggle mouse grab: {grabbed}").as_str(),
-                10.0,
-                48.0 + 42.0,
-                30.0,
-                BLACK,
-            );
+            let center = (screen_width()/2.0, screen_height()/2.0);
+            let crosshair_size = 12.0;
+            draw_line(center.0 - crosshair_size, center.1, center.0 + crosshair_size, center.1, 1.0, BLACK);
+            draw_line(center.0, center.1 - crosshair_size, center.0, center.1 + crosshair_size, 1.0, BLACK);
+
+            draw_text("JUNGLEBEAST", 10.0, 30.0, 30.0, RED);
 
             next_frame().await
         }
