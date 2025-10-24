@@ -177,7 +177,7 @@ impl Game {
                 if is_key_down(KeyCode::D) { obj.vel += step_ad; }
             }
 
-            self.update(delta, do_jump).await;
+            self.handle_physics(delta, do_jump).await;
 
             clear_background(LIGHTGRAY);
 
@@ -200,7 +200,7 @@ impl Game {
         }
     }
 
-    async fn update(&mut self, dt: f32, do_jump: bool) {
+    async fn handle_physics(&mut self, dt: f32, do_jump: bool) {
         let mut bind = self.ecs.query::<(&mut PhysicsObject,)>();
         let (mut phys_objs, ids): (Vec<_>, Vec<_>) =
             bind.iter().map(|(id, (e,))| (e, id)).unzip();
@@ -227,7 +227,6 @@ impl Game {
                     obj.vel.y = 0.0;
 
                 } else if collide {
-                    let a = 0.1;
                     let vec = phys_objs.get(i).unwrap().cube.pos
                         .move_towards(phys_objs.get(j).unwrap().cube.pos, -0.1).normalize();
                     phys_objs.get_mut(i).unwrap().vel = vec;
