@@ -124,6 +124,14 @@ impl Game {
             vec3(0.0, 0.0, 0.0),
             vec3(20.0, 0.0, 20.0),
         )).fixed(),));
+        self.ecs.spawn((PhysicsObject::new(Cube::new(
+            vec3(0.0, 0.5, 5.0),
+            vec3(5.0, 1.0, 1.0),
+        )).fixed(),));
+        self.ecs.spawn((PhysicsObject::new(Cube::new(
+            vec3(0.0, 2.0, -5.0),
+            vec3(5.0, 4.0, 1.0),
+        )).fixed(),));
     }
 
     async fn main(&mut self) {
