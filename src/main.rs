@@ -79,6 +79,7 @@ impl Cube {
 struct PhysicsObject {
     cube: Cube,
     vel: Vec3,
+    friction: f32,
     fixed: bool,
 }
 
@@ -87,12 +88,19 @@ impl PhysicsObject {
         Self {
             cube,
             vel: vec3(0.0, 0.0, 0.0),
+            friction: 1.02,
             fixed: false,
         }
     }
 
     fn fixed(mut self) -> Self {
         self.fixed = true;
+        self
+    }
+
+    #[allow(dead_code)]
+    fn friction(mut self, friction: f32) -> Self {
+        self.friction = friction;
         self
     }
 }
@@ -223,8 +231,11 @@ impl Game {
                 on_ground = on_ground || standing_on;
 
                 if standing_on && collide {
+                    let friction = phys_objs.get(j).unwrap().friction;
                     let obj = phys_objs.get_mut(i).unwrap();
                     obj.vel.y = 0.0;
+                    obj.vel.x /= friction;
+                    obj.vel.z /= friction;
 
                 } else if collide {
                     let vec = phys_objs.get(i).unwrap().cube.pos
