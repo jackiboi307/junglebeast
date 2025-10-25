@@ -122,7 +122,7 @@ impl Game {
         )),));
         self.ecs.spawn((PhysicsObject::new(Cube::new(
             vec3(0.0, 0.0, 0.0),
-            vec3(20.0, 0.0, 20.0),
+            vec3(60.0, 0.0, 60.0),
         )).fixed(),));
         self.ecs.spawn((PhysicsObject::new(Cube::new(
             vec3(0.0, 0.5, 5.0),
@@ -246,9 +246,10 @@ impl Game {
                     obj.vel.z /= friction;
 
                 } else if collide {
-                    let vec = phys_objs.get(i).unwrap().cube.pos
-                        .move_towards(phys_objs.get(j).unwrap().cube.pos, -0.1).normalize();
-                    phys_objs.get_mut(i).unwrap().vel = vec;
+                    let pos1 = phys_objs.get(i).unwrap().cube.pos;
+                    let pos2 = phys_objs.get(j).unwrap().cube.pos;
+                    let obj = phys_objs.get_mut(i).unwrap();
+                    obj.vel = (pos1 - pos2).normalize();
                 }
             }
 
@@ -265,8 +266,9 @@ impl Game {
     async fn render(&self) {
         for (id, (obj,)) in self.ecs.query::<(&PhysicsObject,)>().iter() {
             if id != self.player {
-                draw_cube(obj.cube.pos, obj.cube.size, None, BLUE);
+                // draw_cube(obj.cube.pos, obj.cube.size, None, BLUE);
                 draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
+                draw_sphere(obj.cube.pos, 0.05, None, BLUE);
             }
         }
 
