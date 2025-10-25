@@ -1,7 +1,11 @@
 use macroquad::prelude::*;
+use crate::miniquad::{
+    TextureWrap,
+};
 use hecs::{
     Entity,
 };
+use std::collections::HashMap;
 
 macro_rules! gen_struct {
     (
@@ -98,40 +102,61 @@ impl PhysicsObject {
         self
     }
 
-    #[allow(dead_code)]
-    fn friction(mut self, friction: f32) -> Self {
-        self.friction = friction;
-        self
-    }
+    // fn friction(mut self, friction: f32) -> Self {
+    //     self.friction = friction;
+    //     self
+    // }
 }
 
 gen_struct! { pub Game {
     ecs: hecs::World = hecs::World::new(),
     player: Entity = Entity::DANGLING,
+    textures: HashMap<&'static str, Texture2D> = HashMap::new(),
 } pub new }
 
 impl Game {
-    fn init(&mut self) {
-        self.player = self.ecs.spawn((PhysicsObject::new(Cube::new(
-            vec3(2.0, 2.0, 2.0),
-            vec3(1.0, 2.0, 1.0),
-        )),));
-        self.ecs.spawn((PhysicsObject::new(Cube::new(
+    async fn init(&mut self) {
+        self.load_textures().await;
+        self.load_map();
+    }
+
+    async fn load_textures(&mut self) {
+        // TODO
+        // see if there is a less complicated way that does not use unsafe,
+        // to enable texture repeating
+
+        let backend = unsafe { get_internal_gl().quad_context };
+        let mut new_texture = async |filename| {
+            let image = load_image(filename).await.expect("error loading texture");
+            let id = backend.new_texture_from_rgba8(image.width, image.height, &image.bytes.into_boxed_slice());
+            backend.texture_set_wrap(id, TextureWrap::Repeat, TextureWrap::Repeat);
+            Texture2D::from_miniquad_texture(id)
+        };
+
+        self.textures.insert("rust", new_texture("textures/rust.png").await);
+
+        // self.textures.insert("rust", Texture2D::from_file_with_format(
+        //     include_bytes!("../textures/rust.png"), None));
+    }
+
+    fn load_map(&mut self) {
+        let physobj = |pos, size| PhysicsObject::new(Cube::new(pos, size));
+
+        self.player = self.ecs.spawn((physobj(
+            vec3(0.0, 1.0, 0.0),
+            vec3(1.0, 2.0, 1.0)),));
+        self.ecs.spawn((physobj(
             vec3(0.0, 20.0, 0.0),
-            vec3(1.0, 1.0, 1.0),
-        )),));
-        self.ecs.spawn((PhysicsObject::new(Cube::new(
+            vec3(1.0, 1.0, 1.0)),));
+        self.ecs.spawn((physobj(
             vec3(0.0, 0.0, 0.0),
-            vec3(60.0, 0.0, 60.0),
-        )).fixed(),));
-        self.ecs.spawn((PhysicsObject::new(Cube::new(
+            vec3(60.0, 0.0, 60.0)).fixed(),));
+        self.ecs.spawn((physobj(
             vec3(0.0, 0.5, 5.0),
-            vec3(5.0, 1.0, 1.0),
-        )).fixed(),));
-        self.ecs.spawn((PhysicsObject::new(Cube::new(
+            vec3(5.0, 1.0, 1.0)).fixed(),));
+        self.ecs.spawn((physobj(
             vec3(0.0, 2.0, -5.0),
-            vec3(5.0, 4.0, 1.0),
-        )).fixed(),));
+            vec3(5.0, 4.0, 1.0)).fixed(),));
     }
 
     async fn main(&mut self) {
@@ -265,11 +290,9 @@ impl Game {
     }
 
     async fn render(&self) {
-        for (id, (obj,)) in self.ecs.query::<(&PhysicsObject,)>().iter() {
+        for (id, obj) in self.ecs.query::<&PhysicsObject>().iter() {
             if id != self.player {
-                // draw_cube(obj.cube.pos, obj.cube.size, None, BLUE);
                 draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
-                // draw_sphere(obj.cube.pos, 0.05, None, BLUE);
             }
         }
     
@@ -345,6 +368,6 @@ impl Game {
 #[macroquad::main(conf)]
 async fn main() {
     let mut game = Game::new();
-    game.init();
+    game.init().await;
     game.main().await;
 }
