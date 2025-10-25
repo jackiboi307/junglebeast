@@ -268,7 +268,7 @@ impl Game {
             if id != self.player {
                 // draw_cube(obj.cube.pos, obj.cube.size, None, BLUE);
                 draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
-                draw_sphere(obj.cube.pos, 0.05, None, BLUE);
+                // draw_sphere(obj.cube.pos, 0.05, None, BLUE);
             }
         }
 
