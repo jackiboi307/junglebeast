@@ -217,6 +217,9 @@ impl Game {
     }
 
     async fn handle_physics(&mut self, dt: f32, do_jump: bool) {
+        // TODO
+        // handle all player movement here, so that air control can be limited
+
         let mut bind = self.ecs.query::<(&mut PhysicsObject,)>();
         let (mut phys_objs, ids): (Vec<_>, Vec<_>) =
             bind.iter().map(|(id, (e,))| (e, id)).unzip();
@@ -226,8 +229,6 @@ impl Game {
             let obj = phys_objs.get_mut(i).unwrap();
             obj.vel.y -= 10.0 * dt;
 
-            let mut on_ground = false;
-
             for j in 0..len {
                 if i == j { continue }
 
@@ -236,14 +237,17 @@ impl Game {
                 let standing_on = phys_objs.get(i).unwrap().cube
                     .standing_on(&phys_objs.get(j).unwrap().cube);
 
-                on_ground = on_ground || standing_on;
-
                 if standing_on && collide {
                     let friction = phys_objs.get(j).unwrap().friction;
                     let obj = phys_objs.get_mut(i).unwrap();
                     obj.vel.y = 0.0;
                     obj.vel.x /= friction;
                     obj.vel.z /= friction;
+
+                    // jump
+                    if *ids.get(i).unwrap() == self.player && do_jump {
+                        obj.vel.y += 5.0;
+                    }
 
                 } else if collide {
                     let pos1 = phys_objs.get(i).unwrap().cube.pos;
@@ -254,9 +258,6 @@ impl Game {
             }
 
             let obj = phys_objs.get_mut(i).unwrap();
-            if *ids.get(i).unwrap() == self.player && do_jump && on_ground {
-                obj.vel.y += 5.0;
-            }
             if !obj.fixed {
                 obj.cube.pos += obj.vel * dt;
             }
