@@ -76,6 +76,38 @@ impl Cube {
     }
 }
 
+fn ray_intersection(origin: Vec3, dir: Vec3, cube: &Cube) -> Option<Vec3> {
+    let half = cube.size * 0.5;
+    let min = cube.pos - half;
+    let max = cube.pos + half;
+
+    let mut tmin = f32::NEG_INFINITY;
+    let mut tmax = f32::INFINITY;
+
+    let mut check_axis = |o: f32, d: f32, a_min: f32, a_max: f32| -> bool {
+        if d.abs() < 1e-8 {
+            return !(o < a_min || o > a_max);
+        }
+        let inv = 1.0 / d;
+        let mut t0 = (a_min - o) * inv;
+        let mut t1 = (a_max - o) * inv;
+        if t0 > t1 { std::mem::swap(&mut t0, &mut t1); }
+        if t0 > tmin { tmin = t0; }
+        if t1 < tmax { tmax = t1; }
+        tmin <= tmax
+    };
+
+    if !check_axis(origin.x, dir.x, min.x, max.x) { return None; }
+    if !check_axis(origin.y, dir.y, min.y, max.y) { return None; }
+    if !check_axis(origin.z, dir.z, min.z, max.z) { return None; }
+
+    // tmin is the entry parameter along the line. If you want ray semantics (t >= 0) use:
+    // if tmax < 0.0 { return None; }
+    // let t_enter = tmin.max(0.0);
+    let t_enter = tmin;
+    Some(origin + dir * t_enter)
+}
+
 struct PhysicsObject {
     cube: Cube,
     vel: Vec3,
@@ -269,6 +301,18 @@ impl Game {
                 // draw_cube(obj.cube.pos, obj.cube.size, None, BLUE);
                 draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
                 // draw_sphere(obj.cube.pos, 0.05, None, BLUE);
+            }
+        }
+    
+        let mut rays: Vec<(Vec3, Vec3)> = Vec::new();
+        rays.push((vec3(0.0, 2.0, 0.0), vec3(0.0, -1.0, 0.0)));
+        rays.push((vec3(0.0, 2.0, 0.0), vec3(0.0, -0.2, -1.0)));
+        for (origin, dir) in rays {
+            for (_, (obj,)) in self.ecs.query::<(&PhysicsObject,)>().iter() {
+                if let Some(point) = ray_intersection(origin, dir, &obj.cube) {
+                    draw_line_3d(origin, point, GREEN);
+                    draw_sphere(point, 0.05, None, GREEN);
+                }
             }
         }
 
