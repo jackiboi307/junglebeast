@@ -371,8 +371,27 @@ impl Game {
     }
 }
 
+use clap::{Parser, ValueEnum, arg};
+
+#[derive(ValueEnum, Clone)]
+enum Mode {
+    Client,
+    Server
+}
+
+#[derive(Parser)]
+struct Args {
+    #[arg()]
+    mode: Mode,
+    #[arg()]
+    ip: String,
+    #[arg()]
+    port: String,
+}
+
 #[macroquad::main(conf)]
 async fn main() {
+    let args = Args::parse();
     let mut game = Game::new();
     game.init().await;
     game.main().await;
