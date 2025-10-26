@@ -76,7 +76,8 @@ impl Cube {
     }
 
     fn standing_on(&self, rcs: &Self) -> bool {
-        f32::abs((self.pos.y - self.size.y / 2.0) - (rcs.pos.y + rcs.size.y / 2.0)) < 0.1
+        f32::abs((self.pos.y - self.size.y / 2.0) - (rcs.pos.y + rcs.size.y / 2.0)) < 0.5
+        && self.intersects(rcs)
     }
 }
 
@@ -85,6 +86,10 @@ struct PhysicsObject {
     vel: Vec3,
     friction: f32,
     fixed: bool,
+}
+
+fn physobj(pos: Vec3, size: Vec3) -> PhysicsObject {
+    PhysicsObject::new(Cube::new(pos, size))
 }
 
 impl PhysicsObject {
@@ -99,6 +104,11 @@ impl PhysicsObject {
 
     fn fixed(mut self) -> Self {
         self.fixed = true;
+        self
+    }
+
+    fn vel(mut self, vel: Vec3) -> Self {
+        self.vel = vel;
         self
     }
 
@@ -140,8 +150,6 @@ impl Game {
     }
 
     fn load_map(&mut self) {
-        let physobj = |pos, size| PhysicsObject::new(Cube::new(pos, size));
-
         self.player = self.ecs.spawn((physobj(
             vec3(0.0, 1.0, 0.0),
             vec3(1.0, 2.0, 1.0)),));
@@ -149,8 +157,8 @@ impl Game {
             vec3(0.0, 20.0, 0.0),
             vec3(1.0, 1.0, 1.0)),));
         self.ecs.spawn((physobj(
-            vec3(0.0, 0.0, 0.0),
-            vec3(60.0, 0.0, 60.0)).fixed(),));
+            vec3(0.0, -1.0, 0.0),
+            vec3(60.0, 2.0, 60.0)).fixed(),));
         self.ecs.spawn((physobj(
             vec3(0.0, 0.5, 5.0),
             vec3(5.0, 1.0, 1.0)).fixed(),));
@@ -236,9 +244,9 @@ impl Game {
             });
 
             if is_mouse_button_pressed(MouseButton::Left) {
-                if let Some((point, id)) = self.ray_intersection(player_pos, front, true) {
-                    println!("shot {}", id.id());
-                }
+                self.ecs.spawn((physobj(
+                    player_pos + front * 1.0,
+                    vec3(0.1, 0.1, 0.1)).vel(front * 10.0),));
             }
 
             self.render().await;
@@ -249,7 +257,8 @@ impl Game {
 
     async fn handle_physics(&mut self, dt: f32, do_jump: bool) {
         // TODO
-        // handle all player movement here, so that air control can be limited
+        // handle all player movement here, so that air control can be limited,
+        // and friction doesn't impact walking
 
         let mut bind = self.ecs.query::<(&mut PhysicsObject,)>();
         let (mut phys_objs, ids): (Vec<_>, Vec<_>) =
@@ -268,7 +277,7 @@ impl Game {
                 let standing_on = phys_objs.get(i).unwrap().cube
                     .standing_on(&phys_objs.get(j).unwrap().cube);
 
-                if standing_on && collide {
+                if standing_on {
                     let friction = phys_objs.get(j).unwrap().friction;
                     let obj = phys_objs.get_mut(i).unwrap();
                     obj.vel.y = 0.0;
@@ -302,16 +311,6 @@ impl Game {
             }
         }
     
-        // let mut rays: Vec<(Vec3, Vec3)> = Vec::new();
-        // rays.push((vec3(0.0, 2.0, 0.0), vec3(0.0, -1.0, 0.0)));
-        // rays.push((vec3(0.0, 2.0, 0.0), vec3(0.0, -0.2, -1.0)));
-        // for (origin, dir) in rays {
-        //     if let Some((point, _id)) = self.ray_intersection(origin, dir) {
-        //         draw_line_3d(origin, point, GREEN);
-        //         draw_sphere(point, 0.05, None, GREEN);
-        //     }
-        // }
-
         set_default_camera();
 
         let center = (screen_width()/2.0, screen_height()/2.0);
