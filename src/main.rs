@@ -391,6 +391,10 @@ async fn main() {
 }
 
 #[cfg(server)]
-fn main() {
-    println!("detta är servern");
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let args = Args::parse();
+    let mut game = Game::new();
+    let a = game.init().await;
+    let b = game.main().await;
 }
