@@ -235,6 +235,12 @@ impl Game {
                 ..Default::default()
             });
 
+            if is_mouse_button_pressed(MouseButton::Left) {
+                if let Some((point, id)) = self.ray_intersection(player_pos, front, true) {
+                    println!("shot {}", id.id());
+                }
+            }
+
             self.render().await;
 
             next_frame().await
@@ -296,15 +302,15 @@ impl Game {
             }
         }
     
-        let mut rays: Vec<(Vec3, Vec3)> = Vec::new();
-        rays.push((vec3(0.0, 2.0, 0.0), vec3(0.0, -1.0, 0.0)));
-        rays.push((vec3(0.0, 2.0, 0.0), vec3(0.0, -0.2, -1.0)));
-        for (origin, dir) in rays {
-            if let Some((point, _id)) = self.ray_intersection(origin, dir) {
-                draw_line_3d(origin, point, GREEN);
-                draw_sphere(point, 0.05, None, GREEN);
-            }
-        }
+        // let mut rays: Vec<(Vec3, Vec3)> = Vec::new();
+        // rays.push((vec3(0.0, 2.0, 0.0), vec3(0.0, -1.0, 0.0)));
+        // rays.push((vec3(0.0, 2.0, 0.0), vec3(0.0, -0.2, -1.0)));
+        // for (origin, dir) in rays {
+        //     if let Some((point, _id)) = self.ray_intersection(origin, dir) {
+        //         draw_line_3d(origin, point, GREEN);
+        //         draw_sphere(point, 0.05, None, GREEN);
+        //     }
+        // }
 
         set_default_camera();
 
@@ -316,12 +322,16 @@ impl Game {
         draw_text("JUNGLEBEAST", 10.0, 30.0, 30.0, RED);
     }
 
-    fn ray_intersection(&self, origin: Vec3, dir: Vec3) -> Option<(Vec3, Entity)> {
+    fn ray_intersection(&self, origin: Vec3, dir: Vec3, ignore_player: bool) -> Option<(Vec3, Entity)> {
         // mainly ai generated!
 
         let mut result: Option<(Vec3, Entity)> = None;
 
         for (id, (obj,)) in self.ecs.query::<(&PhysicsObject,)>().iter() {
+            if id == self.player && ignore_player {
+                continue
+            }
+
             let cube = &obj.cube;
             let half = cube.size * 0.5;
             let min = cube.pos - half;
@@ -338,8 +348,8 @@ impl Game {
                 let mut t0 = (a_min - o) * inv;
                 let mut t1 = (a_max - o) * inv;
                 if t0 > t1 { std::mem::swap(&mut t0, &mut t1); }
-                if t0 > tmin { tmin = t0; }
-                if t1 < tmax { tmax = t1; }
+                if t0 > tmin { tmin = t0 }
+                if t1 < tmax { tmax = t1 }
                 tmin <= tmax
             };
 
@@ -349,14 +359,11 @@ impl Game {
                 continue
             }
 
-            // ai generated bullshit:
-            // tmin is the entry parameter along the line. If you want ray semantics (t >= 0) use:
-            // if tmax < 0.0 { return None; }
-            // let t_enter = tmin.max(0.0);
-
-            let t_enter = tmin;
-            let res = origin + dir * t_enter;
-            if result.is_none() || origin.distance(res) < origin.distance(result.unwrap().0) {
+            if tmax < 0.0 { continue }
+            let t_enter = tmin.max(0.0);
+            
+            if result.is_none() || t_enter < origin.distance(result.unwrap().0) {
+                let res = origin + dir * t_enter;
                 result = Some((res, id));
             }
         }
