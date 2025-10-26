@@ -31,16 +31,6 @@ macro_rules! gen_struct {
     }
 }
 
-fn conf() -> Conf {
-    Conf {
-        window_title: String::from("JUNGLEBEAST"),
-        window_width: 1260,
-        window_height: 768,
-        fullscreen: false,
-        ..Default::default()
-    }
-}
-
 struct Cube {
     pos: Vec3,
     size: Vec3,
@@ -371,6 +361,17 @@ impl Game {
     }
 }
 
+#[cfg(not(server))]
+fn conf() -> Conf {
+    Conf {
+        window_title: String::from("JUNGLEBEAST"),
+        window_width: 1260,
+        window_height: 768,
+        fullscreen: false,
+        ..Default::default()
+    }
+}
+
 use clap::{Parser, arg};
 
 #[derive(Parser)]
@@ -395,6 +396,6 @@ async fn main() {
 async fn main() {
     let args = Args::parse();
     let mut game = Game::new();
-    let a = game.init().await;
-    let b = game.main().await;
+    game.init().await;
+    game.main().await;
 }
