@@ -1,10 +1,8 @@
 use crate::*;
-use crate::serialization::Serializer;
+use crate::serialization::*;
 
-use hecs::serialize::column::{
-    deserialize_column, try_serialize, try_serialize_id, DeserializeContext, SerializeContext,
-};
 use serde::{Deserialize, Serialize};
+
 use std::time::Duration;
 
 impl Game {
@@ -33,16 +31,16 @@ impl Game {
         self.create_map();
         self.net.set_server(addr);
 
-        let mut delta = 0.0;
+        let mut last_frame = Instant::now();
 
         loop {
-            let start = Instant::now();
+            let delta = last_frame.elapsed();
+            last_frame = Instant::now();
 
-            self.handle_physics(delta, false).await;
-            self.handle_network(Duration::from_secs_f32(delta)).await;
+            self.handle_physics(delta.as_secs_f32(), false).await;
+            self.handle_network(delta).await;
 
-            delta = start.elapsed().as_secs_f32();
-            sleep(Duration::from_secs_f32(1.0 / 30.0 - delta)).await;
+            sleep(Duration::from_secs_f32(1.0 / 30.0)).await;
         }
     }
 
@@ -57,15 +55,7 @@ impl Game {
                 ServerEvent::ClientConnected { client_id } => {
                     println!("{} connected", client_id);
                     server.send_message(client_id, DefaultChannel::ReliableOrdered, {
-                        let mut buffer: Vec<u8> = Vec::new();
-                        let options = bincode::options();
-                        let mut serializer = bincode::Serializer::new(&mut buffer, options);
-                        hecs::serialize::column::serialize(
-                            &self.ecs,
-                            &mut Serializer,
-                            &mut serializer,
-                        ).unwrap();
-                        buffer
+                        serialize_world(&self.ecs).await
                     });
                 },
                 _ => {}

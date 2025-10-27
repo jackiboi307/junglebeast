@@ -1,7 +1,11 @@
 use crate::*;
-use crate::miniquad::{
+use crate::serialization::*;
+
+use miniquad::{
     TextureWrap,
 };
+
+use std::io::BufReader;
 use std::time::Duration;
 
 impl Game {
@@ -24,14 +28,9 @@ impl Game {
         //     include_bytes!("../textures/rust.png"), None));
     }
 
-    async fn load_map(&mut self) {
-
-    }
-
     pub async fn start_client(&mut self, addr: String) {
         self.load_textures().await;
         self.net.set_client(addr);
-        self.load_map().await;
 
         let mut x = 0.0;
         let mut switch = false;
@@ -130,15 +129,11 @@ impl Game {
         transport.update(duration, &mut client).unwrap();
 
         if client.is_connected() {
-            client.send_message(DefaultChannel::ReliableOrdered, "hej!".as_bytes().to_vec());
-
-            while let Some(text) = client.receive_message(DefaultChannel::ReliableOrdered) {
-                let text = String::from_utf8(text.into()).unwrap();
-                println!("{}", text);
+            while let Some(data) = client.receive_message(DefaultChannel::ReliableOrdered) {
+                let data = data.to_vec();
+                self.ecs = deserialize_world(data.as_slice()).await.unwrap();
+                self.player = unsafe { self.ecs.find_entity_from_id(0) };
             }
-
-        } else {
-            println!("not connected");
         }
 
         transport.send_packets(&mut client).unwrap();

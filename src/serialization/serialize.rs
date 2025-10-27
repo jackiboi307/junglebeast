@@ -1,16 +1,22 @@
 use crate::*;
-use std::any::TypeId;
-use serde::{Deserialize, Serialize};
-use hecs::{*, serialize::column::*};
+use super::*;
 
-#[derive(Serialize, Deserialize)]
-enum ComponentId {
-    PhysicsObject,
+#[derive(Default)]
+struct Context;
+
+pub async fn serialize_world(world: &World) -> Vec<u8> {
+    let mut buffer: Vec<u8> = Vec::new();
+    let options = bincode::options();
+    let mut serializer = bincode::Serializer::new(&mut buffer, options);
+    hecs::serialize::column::serialize(
+        world,
+        &mut Context,
+        &mut serializer,
+    ).unwrap();
+    buffer
 }
 
-pub struct Serializer;
-
-impl SerializeContext for Serializer {
+impl SerializeContext for Context {
     fn component_count(&self, archetype: &Archetype) -> usize {
         archetype.component_types()
             .filter(|&t|
@@ -24,7 +30,7 @@ impl SerializeContext for Serializer {
             mut out: S,
         ) -> Result<S::Ok, S::Error> {
 
-        try_serialize_id::<PhysicsObject, _, _>(archetype, &ComponentId::PhysicsObject, &mut out)?;
+        try_serialize_id::<PhysicsObject, _, _>(archetype, &Id::PhysicsObject, &mut out)?;
         out.end()
     }
 
@@ -34,7 +40,7 @@ impl SerializeContext for Serializer {
             mut out: S,
         ) -> Result<S::Ok, S::Error> {
 
-        try_serialize::<(u8, u8), _>(archetype, &mut out)?;
+        try_serialize::<PhysicsObject, _>(archetype, &mut out)?;
         out.end()
     }
 }
