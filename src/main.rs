@@ -1,11 +1,17 @@
 use macroquad::prelude::*;
-use crate::miniquad::{
-    TextureWrap,
-};
 use hecs::{
     Entity,
 };
 use std::collections::HashMap;
+
+mod network;
+pub use network::*;
+
+#[cfg(not(server))]
+mod client;
+
+#[cfg(server)]
+mod server;
 
 macro_rules! gen_struct {
     (
@@ -112,144 +118,11 @@ gen_struct! { pub Game {
     ecs: hecs::World = hecs::World::new(),
     player: Entity = Entity::DANGLING,
     textures: HashMap<&'static str, Texture2D> = HashMap::new(),
+    net: NetworkHandler = NetworkHandler::new(),
 } pub new }
 
 impl Game {
-    async fn init(&mut self) {
-        self.load_textures().await;
-        self.load_map();
-    }
-
-    async fn load_textures(&mut self) {
-        // TODO
-        // see if there is a less complicated way that does not use unsafe,
-        // to enable texture repeating
-
-        let backend = unsafe { get_internal_gl().quad_context };
-        let mut new_texture = async |filename| {
-            let image = load_image(filename).await.expect("error loading texture");
-            let id = backend.new_texture_from_rgba8(image.width, image.height, &image.bytes.into_boxed_slice());
-            backend.texture_set_wrap(id, TextureWrap::Repeat, TextureWrap::Repeat);
-            Texture2D::from_miniquad_texture(id)
-        };
-
-        self.textures.insert("rust", new_texture("textures/rust.png").await);
-
-        // self.textures.insert("rust", Texture2D::from_file_with_format(
-        //     include_bytes!("../textures/rust.png"), None));
-    }
-
-    fn load_map(&mut self) {
-        self.player = self.ecs.spawn((physobj(
-            vec3(0.0, 1.0, 0.0),
-            vec3(1.0, 2.0, 1.0)),));
-        self.ecs.spawn((physobj(
-            vec3(0.0, 20.0, 0.0),
-            vec3(1.0, 1.0, 1.0)),));
-        self.ecs.spawn((physobj(
-            vec3(0.0, -1.0, 0.0),
-            vec3(60.0, 2.0, 60.0)).fixed(),));
-        self.ecs.spawn((physobj(
-            vec3(0.0, 0.5, 5.0),
-            vec3(5.0, 1.0, 1.0)).fixed(),));
-        self.ecs.spawn((physobj(
-            vec3(0.0, 2.0, -5.0),
-            vec3(5.0, 4.0, 1.0)).fixed(),));
-    }
-
-    async fn main(&mut self) {
-        let mut x = 0.0;
-        let mut switch = false;
-        let bounds = 8.0;
-
-        let world_up = vec3(0.0, 1.0, 0.0);
-        let mut yaw: f32 = 1.18;
-        let mut pitch: f32 = 0.0;
-
-        let mut last_mouse_position: Vec2 = mouse_position().into();
-
-        let move_speed = 0.1;
-        let look_speed = 0.1;
-
-        set_cursor_grab(true);
-        show_mouse(false);
-
-        loop {
-            let delta = get_frame_time();
-
-            let mouse_position: Vec2 = mouse_position().into();
-            let mouse_delta = mouse_position - last_mouse_position;
-
-            last_mouse_position = mouse_position;
-
-            yaw += mouse_delta.x * delta * look_speed;
-            pitch += mouse_delta.y * delta * -look_speed;
-
-            pitch = if pitch > 1.5 { 1.5 } else { pitch };
-            pitch = if pitch < -1.5 { -1.5 } else { pitch };
-
-            let front = vec3(
-                yaw.cos() * pitch.cos(),
-                pitch.sin(),
-                yaw.sin() * pitch.cos(),
-            )
-            .normalize();
-
-            if let Ok(mut obj) = self.ecs.get::<&mut PhysicsObject>(self.player) {
-                obj.cube.rot = front.cross(world_up).normalize();
-            }
-
-            x += if switch { 0.04 } else { -0.04 };
-            if x >= bounds || x <= -bounds {
-                switch = !switch;
-            }
-
-            let do_jump = is_key_pressed(KeyCode::Space);
-
-            if let Ok(mut obj) = self.ecs.get::<&mut PhysicsObject>(self.player) {
-                let step_ws = vec3(obj.cube.rot.z, obj.cube.rot.y, -obj.cube.rot.x) * move_speed;
-                let step_ad = obj.cube.rot * move_speed;
-
-                if is_key_down(KeyCode::W) { obj.vel += step_ws; }
-                if is_key_down(KeyCode::S) { obj.vel -= step_ws; }
-                if is_key_down(KeyCode::A) { obj.vel -= step_ad; }
-                if is_key_down(KeyCode::D) { obj.vel += step_ad; }
-            }
-
-            self.handle_physics(delta, do_jump).await;
-
-            clear_background(LIGHTGRAY);
-
-            let (player_pos, up) = {
-                let cube = &self.ecs.get::<&PhysicsObject>(self.player).unwrap().cube;
-                (cube.pos, cube.rot.cross(front).normalize())
-            };
-
-            set_camera(&Camera3D {
-                position: player_pos,
-                up,
-                target: player_pos + front,
-                fovy: 90.0,
-                ..Default::default()
-            });
-
-            if is_mouse_button_pressed(MouseButton::Left) {
-                self.ecs.spawn((physobj(
-                    player_pos + front * 1.0,
-                    vec3(0.1, 0.1, 0.1)).vel(front * 10.0),));
-            }
-
-            self.render().await;
-
-            next_frame().await
-        }
-    }
-
     async fn handle_physics(&mut self, dt: f32, do_jump: bool) {
-        // TODO
-        // handle all player movement here, so that air control can be limited,
-        // and friction doesn't impact walking
-
         let mut bind = self.ecs.query::<(&mut PhysicsObject,)>();
         let (mut phys_objs, ids): (Vec<_>, Vec<_>) =
             bind.iter().map(|(id, (e,))| (e, id)).unzip();
@@ -275,8 +148,14 @@ impl Game {
                     obj.vel.z /= friction;
 
                     // jump
-                    if *ids.get(i).unwrap() == self.player && do_jump {
-                        obj.vel.y += 5.0;
+                    // TODO decide if this is retarded,
+                    // or a viable client / server separation design
+                    // some event handler system might be better
+                    #[cfg(not(server))]
+                    {
+                        if *ids.get(i).unwrap() == self.player && do_jump {
+                            obj.vel.y += 5.0;
+                        }
                     }
 
                 } else if collide {
@@ -292,23 +171,6 @@ impl Game {
                 obj.cube.pos += obj.vel * dt;
             }
         }
-    }
-
-    async fn render(&self) {
-        for (id, obj) in self.ecs.query::<&PhysicsObject>().iter() {
-            if id != self.player {
-                draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
-            }
-        }
-    
-        set_default_camera();
-
-        let center = (screen_width()/2.0, screen_height()/2.0);
-        let crosshair_size = 12.0;
-        draw_line(center.0 - crosshair_size, center.1, center.0 + crosshair_size, center.1, 1.0, BLACK);
-        draw_line(center.0, center.1 - crosshair_size, center.0, center.1 + crosshair_size, 1.0, BLACK);
-
-        draw_text("JUNGLEBEAST", 10.0, 30.0, 30.0, RED);
     }
 
     fn ray_intersection(&self, origin: Vec3, dir: Vec3, ignore_player: bool) -> Option<(Vec3, Entity)> {
@@ -376,10 +238,8 @@ use clap::{Parser, arg};
 
 #[derive(Parser)]
 struct Args {
-    #[arg()]
-    ip: String,
-    #[arg()]
-    port: String,
+    #[arg(help = "ip:port")]
+    addr: String,
 }
 
 #[cfg(not(server))]
@@ -387,8 +247,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
     let mut game = Game::new();
-    game.init().await;
-    game.main().await;
+    game.start_client(args.addr).await;
 }
 
 #[cfg(server)]
@@ -396,6 +255,5 @@ async fn main() {
 async fn main() {
     let args = Args::parse();
     let mut game = Game::new();
-    game.init().await;
-    game.main().await;
+    game.start_server(args.addr).await;
 }
