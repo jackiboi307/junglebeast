@@ -2,16 +2,19 @@ use macroquad::prelude::*;
 use hecs::{
     Entity,
 };
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 
 mod network;
-pub use network::*;
+mod serialization;
 
 #[cfg(not(server))]
 mod client;
 
 #[cfg(server)]
 mod server;
+
+pub use network::*;
 
 macro_rules! gen_struct {
     (
@@ -37,6 +40,7 @@ macro_rules! gen_struct {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct Cube {
     pos: Vec3,
     size: Vec3,
@@ -77,6 +81,7 @@ impl Cube {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct PhysicsObject {
     cube: Cube,
     vel: Vec3,

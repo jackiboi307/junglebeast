@@ -1,4 +1,10 @@
 use crate::*;
+use crate::serialization::Serializer;
+
+use hecs::serialize::column::{
+    deserialize_column, try_serialize, try_serialize_id, DeserializeContext, SerializeContext,
+};
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 impl Game {
@@ -50,7 +56,17 @@ impl Game {
             match event {
                 ServerEvent::ClientConnected { client_id } => {
                     println!("{} connected", client_id);
-                    server.send_message(client_id, DefaultChannel::ReliableOrdered, "hej från server");
+                    server.send_message(client_id, DefaultChannel::ReliableOrdered, {
+                        let mut buffer: Vec<u8> = Vec::new();
+                        let options = bincode::options();
+                        let mut serializer = bincode::Serializer::new(&mut buffer, options);
+                        hecs::serialize::column::serialize(
+                            &self.ecs,
+                            &mut Serializer,
+                            &mut serializer,
+                        ).unwrap();
+                        buffer
+                    });
                 },
                 _ => {}
             }
