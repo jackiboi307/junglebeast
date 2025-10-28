@@ -100,7 +100,7 @@ impl Game {
 
             self.handle_physics(delta, do_jump).await;
 
-            if first || last_network_tick.elapsed().as_millis() >= 200 {
+            if first || last_network_tick.elapsed().as_millis() >= 100 {
                 self.handle_network(Duration::from_secs_f32(delta)).await;
                 last_network_tick = Instant::now();
                 first = false;
@@ -168,7 +168,14 @@ impl Game {
         let mut msgss: Vec<Vec<_>> = Vec::new();
 
         if client.is_connected() {
-            while let Some(data) = client.receive_message(DefaultChannel::ReliableOrdered) {
+            while let Some(data) = client.receive_message(DefaultChannel::ReliableUnordered) {
+                let data = data.to_vec();
+                let options = bincode::options();
+                let mut deserializer = bincode::Deserializer::from_slice(&data, options);
+                msgss.push(ServerMessages::deserialize(&mut deserializer).unwrap());
+            }
+
+            while let Some(data) = client.receive_message(DefaultChannel::Unreliable) {
                 let data = data.to_vec();
                 let options = bincode::options();
                 let mut deserializer = bincode::Deserializer::from_slice(&data, options);
@@ -176,7 +183,7 @@ impl Game {
             }
 
             if self.ecs.entity(self.player).is_ok() {
-                client.send_message(DefaultChannel::ReliableOrdered, {
+                client.send_message(DefaultChannel::Unreliable, {
                     let msgs = vec![
                         ClientMessage::Shared(SharedMessage::Ecs {
                             PhysicsObject: vec![(self.player,

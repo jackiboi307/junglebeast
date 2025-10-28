@@ -38,7 +38,7 @@ impl Game {
 
             self.handle_physics(delta.as_secs_f32(), false).await;
 
-            if first || last_network_tick.elapsed().as_millis() >= 200 {
+            if first || last_network_tick.elapsed().as_millis() >= 100 {
                 self.handle_network(delta).await;
                 last_network_tick = now;
                 first = false;
@@ -76,33 +76,40 @@ impl Game {
         server.update(duration);
         transport.update(duration, &mut server).unwrap();
 
-        let mut new_client_ids = Vec::new();
         let mut msgss: Vec<Vec<_>> = Vec::new();
 
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected { client_id } => {
                     println!("{} connected", client_id);
-                    new_client_ids.push(client_id);
+
+                    server.send_message(client_id, DefaultChannel::ReliableUnordered, {
+                        let mut msgs = Vec::new();
+
+                        msgs.push({
+                            let player = self.ecs.spawn((physobj(
+                                vec3(0.0, 1.0, 0.0),
+                                vec3(1.0, 2.0, 1.0)),
+                            ));
+
+                            ServerMessage::AssignId(player)
+                        });
+
+                        let mut buffer: Vec<u8> = Vec::new();
+                        let options = bincode::options();
+                        let mut serializer = bincode::Serializer::new(&mut buffer, options);
+                        msgs.serialize(&mut serializer).unwrap();
+
+                        buffer
+                    });
                 },
                 _ => {}
             }
         }
 
         for client in server.clients_id_iter().collect::<Vec<_>>().iter() {
-            server.send_message(*client, DefaultChannel::ReliableOrdered, {
+            server.send_message(*client, DefaultChannel::Unreliable, {
                 let mut msgs = Vec::new();
-
-                if new_client_ids.contains(client) {
-                    msgs.push({
-                        let player = self.ecs.spawn((physobj(
-                            vec3(0.0, 1.0, 0.0),
-                            vec3(1.0, 2.0, 1.0)),
-                        ));
-
-                        ServerMessage::AssignId(player)
-                    });
-                }
 
                 msgs.push(ServerMessage::Shared(SharedMessage::Ecs {
                     PhysicsObject: clone_column!(self, PhysicsObject)
@@ -116,7 +123,7 @@ impl Game {
                 buffer
             });
 
-            while let Some(data) = server.receive_message(*client, DefaultChannel::ReliableOrdered) {
+            while let Some(data) = server.receive_message(*client, DefaultChannel::Unreliable) {
                 let data = data.to_vec();
                 let options = bincode::options();
                 let mut deserializer = bincode::Deserializer::from_slice(&data, options);
