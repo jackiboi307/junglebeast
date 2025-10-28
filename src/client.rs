@@ -175,20 +175,23 @@ impl Game {
                 msgss.push(ServerMessages::deserialize(&mut deserializer).unwrap());
             }
 
-            client.send_message(DefaultChannel::ReliableOrdered, {
-                let msgs = vec![
-                    ClientMessage::Shared(SharedMessage::Ecs {
-                        PhysicsObject: clone_column!(self, PhysicsObject),
-                    }),
-                ];
+            if self.ecs.entity(self.player).is_ok() {
+                client.send_message(DefaultChannel::ReliableOrdered, {
+                    let msgs = vec![
+                        ClientMessage::Shared(SharedMessage::Ecs {
+                            PhysicsObject: vec![(self.player,
+                                self.ecs.query_one::<&PhysicsObject>(self.player).unwrap().get().unwrap().clone())],
+                        }),
+                    ];
 
-                let mut buffer: Vec<u8> = Vec::new();
-                let options = bincode::options();
-                let mut serializer = bincode::Serializer::new(&mut buffer, options);
-                msgs.serialize(&mut serializer).unwrap();
+                    let mut buffer: Vec<u8> = Vec::new();
+                    let options = bincode::options();
+                    let mut serializer = bincode::Serializer::new(&mut buffer, options);
+                    msgs.serialize(&mut serializer).unwrap();
 
-                buffer
-            });
+                    buffer
+                });
+            }
         }
 
         transport.send_packets(&mut client).unwrap();
