@@ -4,15 +4,17 @@ use super::*;
 #[derive(Default)]
 struct Context;
 
-pub async fn serialize_world(world: &World) -> Vec<u8> {
+pub async fn serialize(world: &World) -> Vec<u8> {
     let mut buffer: Vec<u8> = Vec::new();
     let options = bincode::options();
     let mut serializer = bincode::Serializer::new(&mut buffer, options);
+
     hecs::serialize::column::serialize(
         world,
         &mut Context,
         &mut serializer,
     ).unwrap();
+
     buffer
 }
 

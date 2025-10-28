@@ -1,8 +1,11 @@
-mod serialize;
-mod deserialize;
+// mod serialize;
+// mod deserialize;
 
-pub use serialize::serialize_world;
-pub use deserialize::deserialize_world;
+// pub use serialize::serialize;
+// pub use deserialize::deserialize;
+
+mod message;
+pub use message::*;
 
 // https://github.com/Ralith/hecs/blob/master/examples/serialize_to_disk.rs
 
@@ -15,3 +18,13 @@ use hecs::{*, serialize::column::*};
 enum Id {
     PhysicsObject,
 }
+
+#[macro_export]
+macro_rules! clone_column {
+    ($self:ident, $i:ident) => {
+        $self.ecs.query::<&$i>()
+            .iter().map(|(id, e)| (id, e.clone())).collect()
+    }
+}
+
+pub use crate::clone_column;

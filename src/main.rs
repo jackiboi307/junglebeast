@@ -2,7 +2,7 @@ use macroquad::prelude::*;
 use hecs::{
     Entity,
 };
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 mod network;
@@ -40,7 +40,7 @@ macro_rules! gen_struct {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Cube {
     pos: Vec3,
     size: Vec3,
@@ -81,7 +81,7 @@ impl Cube {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct PhysicsObject {
     cube: Cube,
     vel: Vec3,

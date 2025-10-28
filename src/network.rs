@@ -51,7 +51,7 @@ impl NetworkHandler {
     pub fn set_server(&mut self, addr: String) {
         let addr = addr.parse().unwrap();
         let connection_config = ConnectionConfig::default();
-        let mut server: RenetServer = RenetServer::new(connection_config);
+        let server: RenetServer = RenetServer::new(connection_config);
 
         let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
         let server_config = ServerConfig {

@@ -5,8 +5,7 @@ use miniquad::{
     TextureWrap,
 };
 
-use std::io::BufReader;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 impl Game {
     async fn load_textures(&mut self) {
@@ -44,6 +43,9 @@ impl Game {
 
         let move_speed = 0.1;
         let look_speed = 0.1;
+
+        let mut last_network_tick = Instant::now();
+        let mut first = true;
 
         set_cursor_grab(true);
         show_mouse(false);
@@ -97,7 +99,12 @@ impl Game {
             // }
 
             self.handle_physics(delta, do_jump).await;
-            self.handle_network(Duration::from_secs_f32(delta)).await;
+
+            if first || last_network_tick.elapsed().as_millis() >= 200 {
+                self.handle_network(Duration::from_secs_f32(delta)).await;
+                last_network_tick = Instant::now();
+                first = false;
+            }
 
             if self.ecs.entity(self.player).is_err() { next_frame().await; continue }
 
@@ -112,7 +119,7 @@ impl Game {
                 position: player_pos,
                 up,
                 target: player_pos + front,
-                fovy: 90.0,
+                fovy: 2.05,
                 ..Default::default()
             });
 
@@ -122,21 +129,73 @@ impl Game {
         }
     }
 
+    async fn handle_messages(&mut self, msgs: ServerMessages) {
+        for msg in msgs {
+            match msg {
+                ServerMessage::Shared(msg) => {
+                    match msg {
+                        SharedMessage::Ecs {
+                            PhysicsObject,
+                        } => {
+                            for (id, obj) in PhysicsObject {
+                                if self.ecs.entity(id).is_err() {
+                                    self.ecs.spawn_at(id, (obj,));
+                                } else {
+                                    if let Ok(new_obj) = self.ecs.query_one_mut::<&PhysicsObject>(id) {
+                                        let dist = new_obj.cube.pos.distance(obj.cube.pos);
+                                        if dist > 2.0 {
+                                            self.ecs.insert(id, (obj,)).unwrap();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                ServerMessage::AssignId(id) => {
+                    self.player = id;
+                }
+            }
+        }
+    }
+
     async fn handle_network(&mut self, duration: Duration) {
-        let (mut client, mut transport) = self.net.client();
+        let (mut client, transport) = self.net.client();
 
         client.update(duration);
         transport.update(duration, &mut client).unwrap();
 
+        let mut msgss: Vec<Vec<_>> = Vec::new();
+
         if client.is_connected() {
             while let Some(data) = client.receive_message(DefaultChannel::ReliableOrdered) {
                 let data = data.to_vec();
-                self.ecs = deserialize_world(data.as_slice()).await.unwrap();
-                self.player = unsafe { self.ecs.find_entity_from_id(0) };
+                let options = bincode::options();
+                let mut deserializer = bincode::Deserializer::from_slice(&data, options);
+                msgss.push(ServerMessages::deserialize(&mut deserializer).unwrap());
             }
+
+            client.send_message(DefaultChannel::ReliableOrdered, {
+                let msgs = vec![
+                    ClientMessage::Shared(SharedMessage::Ecs {
+                        PhysicsObject: clone_column!(self, PhysicsObject),
+                    }),
+                ];
+
+                let mut buffer: Vec<u8> = Vec::new();
+                let options = bincode::options();
+                let mut serializer = bincode::Serializer::new(&mut buffer, options);
+                msgs.serialize(&mut serializer).unwrap();
+
+                buffer
+            });
         }
 
         transport.send_packets(&mut client).unwrap();
+
+        for msgs in msgss {
+            self.handle_messages(msgs).await;
+        }
     }
 
     async fn render(&self) {

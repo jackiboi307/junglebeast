@@ -6,7 +6,7 @@ struct Context {
     components: Vec<Id>,
 }
 
-pub async fn deserialize_world(data: &[u8])
+pub async fn deserialize(data: &[u8])
         -> Result<hecs::World, Box<bincode::ErrorKind>> {
 
     let options = bincode::options();
