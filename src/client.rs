@@ -1,5 +1,6 @@
 use crate::*;
 
+use renet::DefaultChannel;
 use miniquad::{
     TextureWrap,
 };
@@ -43,8 +44,8 @@ impl Game {
         let move_speed = 0.1;
         let look_speed = 0.1;
 
-        let mut last_network_tick = Instant::now();
-        let mut first = true;
+        let mut net_send = Interval::new(Duration::from_millis(200));
+        let mut net_recv = Interval::new(Duration::from_millis(200));
 
         set_cursor_grab(true);
         show_mouse(false);
@@ -98,12 +99,7 @@ impl Game {
             // }
 
             self.handle_physics(delta, do_jump).await;
-
-            if first || last_network_tick.elapsed().as_millis() >= 100 {
-                self.handle_network(Duration::from_secs_f32(delta)).await;
-                last_network_tick = Instant::now();
-                first = false;
-            }
+            self.handle_network(Duration::from_secs_f32(delta), net_send.tick(), net_recv.tick()).await;
 
             if self.ecs.entity(self.player).is_err() { next_frame().await; continue }
 
@@ -128,82 +124,76 @@ impl Game {
         }
     }
 
-    async fn handle_messages(&mut self, msgs: ServerMessages) {
-        for msg in msgs {
-            match msg {
-                ServerMessage::Shared(msg) => {
-                    match msg {
-                        SharedMessage::Ecs {
-                            PhysicsObject,
-                        } => {
-                            for (id, obj) in PhysicsObject {
-                                if self.ecs.entity(id).is_err() {
-                                    self.ecs.spawn_at(id, (obj,));
-                                } else {
-                                    if let Ok(new_obj) = self.ecs.query_one_mut::<&PhysicsObject>(id) {
-                                        let dist = new_obj.cube.pos.distance(obj.cube.pos);
-                                        if dist > 2.0 {
-                                            self.ecs.insert(id, (obj,)).unwrap();
-                                        }
+    async fn handle_msg(&mut self, msg: ServerMessage) {
+        match msg {
+            ServerMessage::Shared(msg) => {
+                match msg {
+                    SharedMessage::Ecs {
+                        PhysicsObject,
+                    } => {
+                        for (id, obj) in PhysicsObject {
+                            if self.ecs.entity(id).is_err() {
+                                self.ecs.spawn_at(id, (obj,));
+                            } else {
+                                if let Ok(new_obj) = self.ecs.query_one_mut::<&PhysicsObject>(id) {
+                                    let dist = new_obj.cube.pos.distance(obj.cube.pos);
+                                    if dist > 2.0 {
+                                        self.ecs.insert(id, (obj,)).unwrap();
                                     }
                                 }
                             }
                         }
                     }
-                },
-                ServerMessage::AssignId(id) => {
-                    self.player = id;
                 }
+            },
+            ServerMessage::AssignId(id) => {
+                self.player = id;
             }
         }
     }
 
-    async fn handle_network(&mut self, duration: Duration) {
+    async fn handle_network(&mut self, duration: Duration, send: bool, recv: bool) {
         let (mut client, transport) = self.net.client();
 
         client.update(duration);
         transport.update(duration, &mut client).unwrap();
 
-        let mut msgss: Vec<Vec<_>> = Vec::new();
+        let mut msgs: Vec<_> = Vec::new();
 
         if client.is_connected() {
-            while let Some(data) = client.receive_message(DefaultChannel::ReliableUnordered) {
-                let data = data.to_vec();
-                let options = bincode::options();
-                let mut deserializer = bincode::Deserializer::from_slice(&data, options);
-                msgss.push(ServerMessages::deserialize(&mut deserializer).unwrap());
+            if recv {
+                for channel in NET_CHANNELS {
+                    while let Some(ref data) = client.receive_message(channel) {
+                        match deserialize::<ServerMessages>(data) {
+                            Ok(new_msgs) =>
+                                for msg in new_msgs {
+                                    msgs.push(msg);
+                                }
+                            Err(err) => 
+                                eprintln!("{}", err)
+                        }
+                    }
+                }
             }
 
-            while let Some(data) = client.receive_message(DefaultChannel::Unreliable) {
-                let data = data.to_vec();
-                let options = bincode::options();
-                let mut deserializer = bincode::Deserializer::from_slice(&data, options);
-                msgss.push(ServerMessages::deserialize(&mut deserializer).unwrap());
-            }
-
-            if self.ecs.entity(self.player).is_ok() {
-                client.send_message(DefaultChannel::Unreliable, {
-                    let msgs = vec![
-                        ClientMessage::Shared(SharedMessage::Ecs {
-                            PhysicsObject: vec![(self.player,
-                                self.ecs.query_one::<&PhysicsObject>(self.player).unwrap().get().unwrap().clone())],
-                        }),
-                    ];
-
-                    let mut buffer: Vec<u8> = Vec::new();
-                    let options = bincode::options();
-                    let mut serializer = bincode::Serializer::new(&mut buffer, options);
-                    msgs.serialize(&mut serializer).unwrap();
-
-                    buffer
-                });
+            if send {
+                if self.ecs.entity(self.player).is_ok() {
+                    client.send_message(DefaultChannel::Unreliable, serialize(
+                        vec![
+                            ClientMessage::Shared(SharedMessage::Ecs {
+                                PhysicsObject: vec![(self.player,
+                                    self.ecs.query_one::<&PhysicsObject>(self.player).unwrap().get().unwrap().clone())],
+                            }),
+                        ]
+                    ).unwrap());
+                }
             }
         }
 
         transport.send_packets(&mut client).unwrap();
 
-        for msgs in msgss {
-            self.handle_messages(msgs).await;
+        for msg in msgs {
+            self.handle_msg(msg).await;
         }
     }
 

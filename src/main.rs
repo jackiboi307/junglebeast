@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 mod network;
+mod utils;
 
 #[cfg(not(server))]
 mod client;
@@ -14,6 +15,7 @@ mod client;
 mod server;
 
 pub use network::*;
+pub use utils::*;
 
 macro_rules! gen_struct {
     (
