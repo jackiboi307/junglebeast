@@ -1,29 +1,30 @@
 use crate::*;
-use renet::{ServerEvent, DefaultChannel};
+use renet::{RenetServer, ServerEvent, DefaultChannel};
+use renet_netcode::NetcodeServerTransport;
 use std::time::Duration;
 
-impl Game {
-    fn create_map(&mut self) {
-        // self.ecs.spawn((physobj(
-        //     vec3(0.0, 20.0, 0.0),
-        //     vec3(1.0, 1.0, 1.0)),));
-        self.ecs.spawn((physobj(
-            vec3(0.0, -1.0, 0.0),
-            vec3(60.0, 2.0, 60.0)).fixed(),));
-        self.ecs.spawn((physobj(
-            vec3(0.0, 0.5, 5.0),
-            vec3(5.0, 1.0, 1.0)).fixed(),));
-        self.ecs.spawn((physobj(
-            vec3(0.0, 2.0, -5.0),
-            vec3(5.0, 4.0, 1.0)).fixed(),));
+pub struct Server {
+    shared: Shared,
+    server: RenetServer,
+    transport: NetcodeServerTransport,
+}
+
+impl Server {
+    pub fn create(addr: String) -> Self {
+        let (server, transport) = create_server(addr);
+
+        Self {
+            shared: Shared::new(),
+            server,
+            transport,
+        }
     }
 
-    pub async fn start_server(&mut self, addr: String) {
+    pub async fn start(&mut self) {
         use std::time::{Duration, Instant};
         use tokio::time::sleep;
 
         self.create_map();
-        self.net.set_server(addr);
 
         let mut update   = Interval::new(Duration::from_millis(1000 / 30));
         let mut net_send = Interval::new(Duration::from_millis(200));
@@ -33,10 +34,25 @@ impl Game {
             if update.tick() {
                 let delta = update.delta();
 
-                self.handle_physics(delta.as_secs_f32(), false).await;
+                self.shared.handle_physics(delta.as_secs_f32(), None).await;
                 self.handle_network(delta, net_send.tick(), net_recv.tick()).await;
             }
         }
+    }
+
+    fn create_map(&mut self) {
+        // self.ecs.spawn((physobj(
+        //     vec3(0.0, 20.0, 0.0),
+        //     vec3(1.0, 1.0, 1.0)),));
+        self.shared.ecs.spawn((physobj(
+            vec3(0.0, -1.0, 0.0),
+            vec3(60.0, 2.0, 60.0)).fixed(),));
+        self.shared.ecs.spawn((physobj(
+            vec3(0.0, 0.5, 5.0),
+            vec3(5.0, 1.0, 1.0)).fixed(),));
+        self.shared.ecs.spawn((physobj(
+            vec3(0.0, 2.0, -5.0),
+            vec3(5.0, 4.0, 1.0)).fixed(),));
     }
 
     async fn handle_msg(&mut self, msg: ClientMessage) {
@@ -47,11 +63,11 @@ impl Game {
                         PhysicsObject,
                     } => {
                         for (id, obj) in PhysicsObject {
-                            if self.ecs.entity(id).is_err() {
-                                self.ecs.spawn_at(id, ());
+                            if self.shared.ecs.entity(id).is_err() {
+                                self.shared.ecs.spawn_at(id, ());
                             }
 
-                            self.ecs.insert(id, (obj,)).unwrap();
+                            self.shared.ecs.insert(id, (obj,)).unwrap();
                         }
                     }
                 }
@@ -60,18 +76,16 @@ impl Game {
     }
 
     async fn handle_network(&mut self, duration: Duration, send: bool, recv: bool) {
-        let (mut server, transport) = self.net.server();
+        self.server.update(duration);
+        self.transport.update(duration, &mut self.server).unwrap();
 
-        server.update(duration);
-        transport.update(duration, &mut server).unwrap();
-
-        while let Some(event) = server.get_event() {
+        while let Some(event) = self.server.get_event() {
             match event {
                 ServerEvent::ClientConnected { client_id } => {
                     println!("{} connected", client_id);
-                    server.send_message(client_id, DefaultChannel::ReliableUnordered, serialize(
+                    self.server.send_message(client_id, DefaultChannel::ReliableUnordered, serialize(
                         vec![{
-                            let player = self.ecs.spawn((physobj(
+                            let player = self.shared.ecs.spawn((physobj(
                                 vec3(0.0, 1.0, 0.0),
                                 vec3(1.0, 2.0, 1.0)),
                             ));
@@ -86,9 +100,9 @@ impl Game {
 
         let mut msgs: ClientMessages = Vec::new();
 
-        for client in server.clients_id_iter().collect::<Vec<_>>().iter() {
+        for client in self.server.clients_id_iter().collect::<Vec<_>>().iter() {
             if send {
-                server.send_message(*client, DefaultChannel::Unreliable, serialize(
+                self.server.send_message(*client, DefaultChannel::Unreliable, serialize(
                     vec![
                         ServerMessage::Shared(SharedMessage::Ecs {
                             PhysicsObject: clone_column!(self, PhysicsObject)
@@ -99,7 +113,7 @@ impl Game {
 
             if recv {
                 for channel in NET_CHANNELS {
-                    while let Some(ref data) = server.receive_message(*client, channel) {
+                    while let Some(ref data) = self.server.receive_message(*client, channel) {
                         match deserialize::<ClientMessages>(data) {
                             Ok(new_msgs) =>
                                 for msg in new_msgs {
@@ -113,7 +127,7 @@ impl Game {
             }
         }
 
-        transport.send_packets(&mut server);
+        self.transport.send_packets(&mut self.server);
 
         for msg in msgs {
             self.handle_msg(msg).await;

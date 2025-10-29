@@ -4,6 +4,7 @@ use hecs::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::cmp::max;
 
 mod network;
 mod utils;
@@ -88,6 +89,7 @@ struct PhysicsObject {
     vel: Vec3,
     friction: f32,
     fixed: bool,
+    on_ground: bool,
 }
 
 fn physobj(pos: Vec3, size: Vec3) -> PhysicsObject {
@@ -101,6 +103,7 @@ impl PhysicsObject {
             vel: vec3(0.0, 0.0, 0.0),
             friction: 1.02,
             fixed: false,
+            on_ground: false,
         }
     }
 
@@ -120,55 +123,58 @@ impl PhysicsObject {
     // }
 }
 
-gen_struct! { pub Game {
-    ecs: hecs::World = hecs::World::new(),
-    player: Entity = Entity::DANGLING,
-    textures: HashMap<&'static str, Texture2D> = HashMap::new(),
-    net: NetworkHandler = NetworkHandler::new(),
-} pub new }
+pub struct Shared {
+    ecs: hecs::World,
+    textures: HashMap<&'static str, Texture2D>,
+}
 
-impl Game {
-    async fn handle_physics(&mut self, dt: f32, do_jump: bool) {
+impl Shared {
+    fn new() -> Self {
+        Self {
+            ecs: hecs::World::new(),
+            textures: HashMap::new(),
+        }
+    }
+
+    async fn handle_physics(&mut self, dt: f32, do_jump: Option<Entity>) {
         let mut bind = self.ecs.query::<(&mut PhysicsObject,)>();
         let (mut phys_objs, ids): (Vec<_>, Vec<_>) =
             bind.iter().map(|(id, (e,))| (e, id)).unzip();
         let len = phys_objs.len();
 
         for i in 0..len {
-            let obj = phys_objs.get_mut(i).unwrap();
+            let obj = &mut phys_objs[i];
             obj.vel.y -= 10.0 * dt;
 
             for j in 0..len {
                 if i == j { continue }
+                let (a, b) = phys_objs.split_at_mut(max(i, j));
+                let (obj1, obj2) =
+                    if i < j {
+                        (&mut a[i], &mut b[0])
+                    } else {
+                        (&mut b[0], &mut a[j])
+                    };
 
-                let collide = phys_objs.get(i).unwrap().cube
-                    .intersects(&phys_objs.get(j).unwrap().cube);
-                let standing_on = phys_objs.get(i).unwrap().cube
-                    .standing_on(&phys_objs.get(j).unwrap().cube);
+                let old_on_ground = obj1.on_ground;
+                obj1.on_ground = obj1.cube.standing_on(&obj2.cube);
 
-                if standing_on {
-                    let friction = phys_objs.get(j).unwrap().friction;
-                    let obj = phys_objs.get_mut(i).unwrap();
-                    obj.vel.y = 0.0;
-                    obj.vel.x /= friction;
-                    obj.vel.z /= friction;
+                let collide = obj1.cube.intersects(&obj2.cube);
 
-                    // jump
-                    // TODO decide if this is retarded,
-                    // or a viable client / server separation design
-                    // some event handler system might be better
-                    #[cfg(not(server))]
-                    {
-                        if *ids.get(i).unwrap() == self.player && do_jump {
-                            obj.vel.y += 5.0;
+                if obj1.on_ground {
+                    let friction = obj2.friction;
+                    obj1.vel.x /= friction;
+                    obj1.vel.z /= friction;
+                    obj1.vel.y = 0.0;
+
+                    if let Some(id) = do_jump {
+                        if ids[i] == id {
+                            obj1.vel.y = 5.0;
                         }
                     }
 
                 } else if collide {
-                    let pos1 = phys_objs.get(i).unwrap().cube.pos;
-                    let pos2 = phys_objs.get(j).unwrap().cube.pos;
-                    let obj = phys_objs.get_mut(i).unwrap();
-                    obj.vel = (pos1 - pos2).normalize();
+                    obj1.vel = (obj1.cube.pos - obj2.cube.pos).normalize();
                 }
             }
 
@@ -179,13 +185,13 @@ impl Game {
         }
     }
 
-    fn ray_intersection(&self, origin: Vec3, dir: Vec3, ignore_player: bool) -> Option<(Vec3, Entity)> {
+    fn ray_intersection(&self, origin: Vec3, dir: Vec3, ignore_ids: &[Entity]) -> Option<(Vec3, Entity)> {
         // mainly ai generated!
 
         let mut result: Option<(Vec3, Entity)> = None;
 
         for (id, (obj,)) in self.ecs.query::<(&PhysicsObject,)>().iter() {
-            if id == self.player && ignore_player {
+            if ignore_ids.contains(&id) {
                 continue
             }
 
@@ -252,14 +258,14 @@ struct Args {
 #[macroquad::main(conf)]
 async fn main() {
     let args = Args::parse();
-    let mut game = Game::new();
-    game.start_client(args.addr).await;
+    let mut client = client::Client::create(args.addr);
+    client.start().await;
 }
 
 #[cfg(server)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args = Args::parse();
-    let mut game = Game::new();
-    game.start_server(args.addr).await;
+    let mut server = server::Server::create(args.addr);
+    server.start().await;
 }

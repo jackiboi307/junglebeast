@@ -1,35 +1,34 @@
 use crate::*;
 
-use renet::DefaultChannel;
+use renet::{RenetClient, ServerEvent, DefaultChannel};
+use renet_netcode::NetcodeClientTransport;
 use miniquad::{
     TextureWrap,
 };
 
 use std::time::{Duration, Instant};
 
-impl Game {
-    async fn load_textures(&mut self) {
-        // TODO
-        // see if there is a less complicated way that does not use unsafe,
-        // to enable texture repeating
+pub struct Client {
+    shared: Shared,
+    client: RenetClient,
+    transport: NetcodeClientTransport,
+    player: Entity,
+}
 
-        let backend = unsafe { get_internal_gl().quad_context };
-        let mut new_texture = async |filename| {
-            let image = load_image(filename).await.expect("error loading texture");
-            let id = backend.new_texture_from_rgba8(image.width, image.height, &image.bytes.into_boxed_slice());
-            backend.texture_set_wrap(id, TextureWrap::Repeat, TextureWrap::Repeat);
-            Texture2D::from_miniquad_texture(id)
-        };
+impl Client {
+    pub fn create(addr: String) -> Self {
+        let (client, transport) = create_client(addr);
 
-        self.textures.insert("rust", new_texture("textures/rust.png").await);
-
-        // self.textures.insert("rust", Texture2D::from_file_with_format(
-        //     include_bytes!("../textures/rust.png"), None));
+        Self {
+            shared: Shared::new(),
+            client,
+            transport,
+            player: Entity::DANGLING,
+        }
     }
 
-    pub async fn start_client(&mut self, addr: String) {
+    pub async fn start(&mut self) {
         self.load_textures().await;
-        self.net.set_client(addr);
 
         let mut x = 0.0;
         let mut switch = false;
@@ -71,7 +70,7 @@ impl Game {
             )
             .normalize();
 
-            if let Ok(mut obj) = self.ecs.get::<&mut PhysicsObject>(self.player) {
+            if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(self.player) {
                 obj.cube.rot = front.cross(world_up).normalize();
             }
 
@@ -80,9 +79,9 @@ impl Game {
                 switch = !switch;
             }
 
-            let do_jump = is_key_pressed(KeyCode::Space);
+            let mut do_jump = None;
 
-            if let Ok(mut obj) = self.ecs.get::<&mut PhysicsObject>(self.player) {
+            if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(self.player) {
                 let step_ws = vec3(obj.cube.rot.z, obj.cube.rot.y, -obj.cube.rot.x) * move_speed;
                 let step_ad = obj.cube.rot * move_speed;
 
@@ -90,7 +89,14 @@ impl Game {
                 if is_key_down(KeyCode::S) { obj.vel -= step_ws; }
                 if is_key_down(KeyCode::A) { obj.vel -= step_ad; }
                 if is_key_down(KeyCode::D) { obj.vel += step_ad; }
+
+                if is_key_pressed(KeyCode::Space) {
+                    do_jump = Some(self.player);
+                }
             }
+
+            self.shared.handle_physics(delta, do_jump).await;
+            self.handle_network(Duration::from_secs_f32(delta), net_send.tick(), net_recv.tick()).await;
 
             // if is_mouse_button_pressed(MouseButton::Left) {
             //     self.ecs.spawn((physobj(
@@ -98,13 +104,10 @@ impl Game {
             //         vec3(0.1, 0.1, 0.1)).vel(front * 10.0),));
             // }
 
-            self.handle_physics(delta, do_jump).await;
-            self.handle_network(Duration::from_secs_f32(delta), net_send.tick(), net_recv.tick()).await;
-
-            if self.ecs.entity(self.player).is_err() { next_frame().await; continue }
+            if self.shared.ecs.entity(self.player).is_err() { next_frame().await; continue }
 
             let (player_pos, up) = {
-                let cube = &self.ecs.get::<&PhysicsObject>(self.player).unwrap().cube;
+                let cube = &self.shared.ecs.get::<&PhysicsObject>(self.player).unwrap().cube;
                 (cube.pos, cube.rot.cross(front).normalize())
             };
 
@@ -124,6 +127,25 @@ impl Game {
         }
     }
 
+    async fn load_textures(&mut self) {
+        // TODO
+        // see if there is a less complicated way that does not use unsafe,
+        // to enable texture repeating
+
+        let backend = unsafe { get_internal_gl().quad_context };
+        let mut new_texture = async |filename| {
+            let image = load_image(filename).await.expect("error loading texture");
+            let id = backend.new_texture_from_rgba8(image.width, image.height, &image.bytes.into_boxed_slice());
+            backend.texture_set_wrap(id, TextureWrap::Repeat, TextureWrap::Repeat);
+            Texture2D::from_miniquad_texture(id)
+        };
+
+        self.shared.textures.insert("rust", new_texture("textures/rust.png").await);
+
+        // self.textures.insert("rust", Texture2D::from_file_with_format(
+        //     include_bytes!("../textures/rust.png"), None));
+    }
+
     async fn handle_msg(&mut self, msg: ServerMessage) {
         match msg {
             ServerMessage::Shared(msg) => {
@@ -132,13 +154,13 @@ impl Game {
                         PhysicsObject,
                     } => {
                         for (id, obj) in PhysicsObject {
-                            if self.ecs.entity(id).is_err() {
-                                self.ecs.spawn_at(id, (obj,));
+                            if self.shared.ecs.entity(id).is_err() {
+                                self.shared.ecs.spawn_at(id, (obj,));
                             } else {
-                                if let Ok(new_obj) = self.ecs.query_one_mut::<&PhysicsObject>(id) {
+                                if let Ok(new_obj) = self.shared.ecs.query_one_mut::<&PhysicsObject>(id) {
                                     let dist = new_obj.cube.pos.distance(obj.cube.pos);
                                     if dist > 2.0 {
-                                        self.ecs.insert(id, (obj,)).unwrap();
+                                        self.shared.ecs.insert(id, (obj,)).unwrap();
                                     }
                                 }
                             }
@@ -153,17 +175,15 @@ impl Game {
     }
 
     async fn handle_network(&mut self, duration: Duration, send: bool, recv: bool) {
-        let (mut client, transport) = self.net.client();
-
-        client.update(duration);
-        transport.update(duration, &mut client).unwrap();
+        self.client.update(duration);
+        self.transport.update(duration, &mut self.client).unwrap();
 
         let mut msgs: Vec<_> = Vec::new();
 
-        if client.is_connected() {
+        if self.client.is_connected() {
             if recv {
                 for channel in NET_CHANNELS {
-                    while let Some(ref data) = client.receive_message(channel) {
+                    while let Some(ref data) = self.client.receive_message(channel) {
                         match deserialize::<ServerMessages>(data) {
                             Ok(new_msgs) =>
                                 for msg in new_msgs {
@@ -177,12 +197,13 @@ impl Game {
             }
 
             if send {
-                if self.ecs.entity(self.player).is_ok() {
-                    client.send_message(DefaultChannel::Unreliable, serialize(
+                if self.shared.ecs.entity(self.player).is_ok() {
+                    self.client.send_message(DefaultChannel::Unreliable, serialize(
                         vec![
                             ClientMessage::Shared(SharedMessage::Ecs {
                                 PhysicsObject: vec![(self.player,
-                                    self.ecs.query_one::<&PhysicsObject>(self.player).unwrap().get().unwrap().clone())],
+                                    self.shared.ecs.query_one::<&PhysicsObject>(self.player)
+                                    .unwrap().get().unwrap().clone())],
                             }),
                         ]
                     ).unwrap());
@@ -190,7 +211,7 @@ impl Game {
             }
         }
 
-        transport.send_packets(&mut client).unwrap();
+        self.transport.send_packets(&mut self.client).unwrap();
 
         for msg in msgs {
             self.handle_msg(msg).await;
@@ -198,7 +219,7 @@ impl Game {
     }
 
     async fn render(&self) {
-        for (id, obj) in self.ecs.query::<&PhysicsObject>().iter() {
+        for (id, obj) in self.shared.ecs.query::<&PhysicsObject>().iter() {
             if id != self.player {
                 draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
             }
