@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 mod network;
-mod serialization;
 
 #[cfg(not(server))]
 mod client;

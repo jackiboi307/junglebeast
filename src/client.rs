@@ -1,5 +1,4 @@
 use crate::*;
-use crate::serialization::*;
 
 use miniquad::{
     TextureWrap,
