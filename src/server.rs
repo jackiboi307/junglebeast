@@ -54,13 +54,15 @@ impl Server {
             vec3(5.0, 4.0, 1.0)).fixed(),));
     }
 
-    async fn handle_msg(&mut self, id: ClientId, msg: ClientMessage) {
+    async fn handle_msg(&mut self, cli_id: ClientId, msg: ClientMessage) {
+        let id = self.client_ids[&cli_id];
         match msg {
             ClientMessage::PosVel(pos, vel) => {
-                let obj = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(self.client_ids[&id]).unwrap();
+                let obj = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(id).unwrap();
                 obj.cube.pos = pos;
                 obj.vel = vel;
-            }
+            },
+            ClientMessage::Shot(shot_id) => println!("{id:?} has shot {shot_id:?}"),
         }
     }
 
@@ -75,18 +77,19 @@ impl Server {
                     self.server.send_message(client_id, DefaultChannel::ReliableUnordered, serialize(
                         vec![
                             ServerMessage::AssignId({
-                                let id = self.shared.ecs.spawn((physobj(
-                                    vec3(0.0, 1.0, 0.0),
-                                    vec3(1.0, 2.0, 1.0)),
+                                let id = self.shared.ecs.spawn((
+                                    Player {},
+                                    physobj(
+                                        vec3(0.0, 1.0, 0.0),
+                                        vec3(1.0, 2.0, 1.0)
+                                    ),
                                 ));
                                 self.client_ids.insert(client_id, id);
                                 id
                             }),
                             ServerMessage::Ecs(Columns {
-                                PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
-                                    .map(|(id, obj)| (id, obj.clone()))
-                                    .collect(),
-                                ..Columns::default()
+                                PhysicsObject: clone_column!(self, &PhysicsObject),
+                                Player: clone_column!(self, &Player),
                             }),
                         ]
                     ).unwrap());

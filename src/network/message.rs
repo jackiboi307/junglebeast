@@ -14,6 +14,7 @@ pub enum ServerMessage {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     PosVel(Vec3, Vec3),
+    Shot(Entity),
 }
 
 type Column<T> = Vec<(Entity, T)>;

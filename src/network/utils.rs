@@ -17,9 +17,10 @@ pub fn deserialize<T: for<'a> Deserialize<'a>>(data: &renet::Bytes) -> Result<T,
 
 #[macro_export]
 macro_rules! clone_column {
-    ($self:ident, $i:ident) => {
-        $self.shared.ecs.query::<&$i>()
-            .iter().map(|(id, e)| (id, e.clone())).collect()
+    ($self:ident, $type:ty) => {
+        $self.shared.ecs.query::<$type>().iter()
+            .map(|(id, obj)| (id, (*obj).clone()))
+            .collect()
     }
 }
 

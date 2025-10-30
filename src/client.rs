@@ -100,39 +100,47 @@ impl Client {
                 }
             }
 
-            self.shared.handle_physics(delta, do_jump).await;
-            self.handle_network(Duration::from_secs_f32(delta)).await;
+            let mut messages = ClientMessages::new();
 
-            // if is_mouse_button_pressed(MouseButton::Left) {
-            //     self.ecs.spawn((physobj(
-            //         player_pos + front * 1.0,
-            //         vec3(0.1, 0.1, 0.1)).vel(front * 10.0),));
-            // }
+            if self.shared.ecs.entity(self.player).is_ok() {
+                self.shared.handle_physics(delta, do_jump).await;
 
-            if self.shared.ecs.entity(self.player).is_err() { next_frame().await; continue }
+                let (pos, vel, up) = {
+                    let obj = self.shared.ecs.get::<&PhysicsObject>(self.player).unwrap();
+                    (obj.cube.pos, obj.vel, obj.clone().cube.rot.cross(front).normalize())
+                };
 
-            let (player_pos, up) = {
-                let cube = &self.shared.ecs.get::<&PhysicsObject>(self.player).unwrap().cube;
-                (cube.pos, cube.rot.cross(front).normalize())
-            };
+                messages.push(ClientMessage::PosVel(pos, vel));
 
-            if is_mouse_button_pressed(MouseButton::Left) {
-                if let Some((_, id)) = self.shared.ray_intersection(player_pos, front, &[self.player]) {
-                    println!("shot {:?}", id);
+                if is_mouse_button_pressed(MouseButton::Left) {
+                    if let Some((_, id)) = self.shared.ray_intersection(pos, front, &[self.player]) {
+                        if self.shared.ecs.get::<&Player>(id).is_ok() {
+                            messages.push(ClientMessage::Shot(id));
+                        }
+                    }
                 }
+
+                // if is_mouse_button_pressed(MouseButton::Left) {
+                //     self.ecs.spawn((physobj(
+                //         player_pos + front * 1.0,
+                //         vec3(0.1, 0.1, 0.1)).vel(front * 10.0),));
+                // }
+
+                set_camera(&Camera3D {
+                    position: pos,
+                    up,
+                    target: pos + front,
+                    fovy: 2.05,
+                    ..Default::default()
+                });
+
+                self.render().await;
+
+            } else {
+                draw_text("CONNECTING...", 10.0, 30.0, 30.0, WHITE);
             }
 
-            clear_background(LIGHTGRAY);
-
-            set_camera(&Camera3D {
-                position: player_pos,
-                up,
-                target: player_pos + front,
-                fovy: 2.05,
-                ..Default::default()
-            });
-
-            self.render().await;
+            self.handle_network(Duration::from_secs_f32(delta), messages).await;
 
             next_frame().await
         }
@@ -172,6 +180,10 @@ impl Client {
                         }
                     }
                 }
+
+                for (id, obj) in columns.Player {
+                    self.shared.ecs.insert(id, (obj,)).unwrap();
+                }
             },
             ServerMessage::AssignId(id) => {
                 self.player = id;
@@ -179,7 +191,7 @@ impl Client {
         }
     }
 
-    async fn handle_network(&mut self, duration: Duration) {
+    async fn handle_network(&mut self, duration: Duration, send_msgs: ClientMessages) {
         self.client.update(duration);
         self.transport.update(duration, &mut self.client).unwrap();
 
@@ -199,16 +211,9 @@ impl Client {
                 }
             }
 
-            if self.shared.ecs.entity(self.player).is_ok() {
-                self.client.send_message(DefaultChannel::Unreliable, serialize(
-                    vec![
-                        {
-                            let obj = self.shared.ecs.get::<&PhysicsObject>(self.player).unwrap();
-                            ClientMessage::PosVel(obj.cube.pos, obj.vel)
-                        },
-                    ]
-                ).unwrap());
-            }
+            self.client.send_message(DefaultChannel::Unreliable,
+                serialize(send_msgs).unwrap()
+            );
         }
 
         self.transport.send_packets(&mut self.client).unwrap();
@@ -219,6 +224,8 @@ impl Client {
     }
 
     async fn render(&self) {
+        clear_background(LIGHTGRAY);
+
         for (id, obj) in self.shared.ecs.query::<&PhysicsObject>().iter() {
             if id != self.player {
                 draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
