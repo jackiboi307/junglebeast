@@ -7,6 +7,7 @@ use std::cmp::max;
 
 mod network;
 mod utils;
+mod components;
 
 #[cfg(not(server))]
 mod client;
@@ -16,83 +17,7 @@ mod server;
 
 pub use network::*;
 pub use utils::*;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Cube {
-    pos: Vec3,
-    size: Vec3,
-    rot: Vec3,
-}
-
-impl Cube {
-    fn new(pos: Vec3, size: Vec3) -> Self {
-        Self {
-            pos,
-            size,
-            rot: vec3(0.0, 0.0, 0.0),
-        }
-    }
-
-    fn mins(&self) -> Vec3 {
-        vec3(self.pos.x - self.size.x * 0.5, self.pos.y - self.size.y * 0.5, self.pos.z - self.size.z * 0.5)
-    }
-
-    fn maxs(&self) -> Vec3 {
-        vec3(self.pos.x + self.size.x * 0.5, self.pos.y + self.size.y * 0.5, self.pos.z + self.size.z * 0.5)
-    }
-
-    fn intersects(&self, rcs: &Self) -> bool {
-        let a_min = self.mins();
-        let a_max = self.maxs();
-        let b_min = rcs.mins();
-        let b_max = rcs.maxs();
-
-        !(a_max.x < b_min.x || a_min.x > b_max.x ||
-          a_max.y < b_min.y || a_min.y > b_max.y ||
-          a_max.z < b_min.z || a_min.z > b_max.z)
-    }
-
-    fn standing_on(&self, rcs: &Self) -> bool {
-        f32::abs((self.pos.y - self.size.y / 2.0) - (rcs.pos.y + rcs.size.y / 2.0)) < 0.5
-        && self.intersects(rcs)
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PhysicsObject {
-    cube: Cube,
-    vel: Vec3,
-    friction: f32,
-    fixed: bool,
-    on_ground: bool,
-}
-
-impl PhysicsObject {
-    fn new(cube: Cube) -> Self {
-        Self {
-            cube,
-            vel: vec3(0.0, 0.0, 0.0),
-            friction: 1.02,
-            fixed: false,
-            on_ground: false,
-        }
-    }
-
-    fn fixed(mut self) -> Self {
-        self.fixed = true;
-        self
-    }
-
-    // fn vel(mut self, vel: Vec3) -> Self {
-    //     self.vel = vel;
-    //     self
-    // }
-
-    // fn friction(mut self, friction: f32) -> Self {
-    //     self.friction = friction;
-    //     self
-    // }
-}
+pub use components::*;
 
 pub struct Shared {
     ecs: hecs::World,

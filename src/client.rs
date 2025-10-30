@@ -116,6 +116,12 @@ impl Client {
                 (cube.pos, cube.rot.cross(front).normalize())
             };
 
+            if is_mouse_button_pressed(MouseButton::Left) {
+                if let Some((_, id)) = self.shared.ray_intersection(player_pos, front, &[self.player]) {
+                    println!("shot {:?}", id);
+                }
+            }
+
             clear_background(LIGHTGRAY);
 
             set_camera(&Camera3D {
@@ -153,10 +159,8 @@ impl Client {
 
     async fn handle_msg(&mut self, msg: ServerMessage) {
         match msg {
-            ServerMessage::Ecs {
-                PhysicsObject,
-            } => {
-                for (id, obj) in PhysicsObject {
+            ServerMessage::Ecs(columns) => {
+                for (id, obj) in columns.PhysicsObject {
                     if self.shared.ecs.entity(id).is_err() {
                         self.shared.ecs.spawn_at(id, (obj,));
                     } else {

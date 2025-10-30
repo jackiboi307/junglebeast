@@ -8,12 +8,18 @@ pub type ClientMessages = Vec<ClientMessage>;
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     AssignId(Entity),
-    Ecs {
-        PhysicsObject: Vec<(Entity, PhysicsObject)>,
-    },
+    Ecs(Columns),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     PosVel(Vec3, Vec3),
+}
+
+type Column<T> = Vec<(Entity, T)>;
+
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub struct Columns {
+    pub PhysicsObject: Column<PhysicsObject>,
+    pub Player:        Column<Player>,
 }

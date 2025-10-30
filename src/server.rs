@@ -82,11 +82,12 @@ impl Server {
                                 self.client_ids.insert(client_id, id);
                                 id
                             }),
-                            ServerMessage::Ecs {
+                            ServerMessage::Ecs(Columns {
                                 PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
                                     .map(|(id, obj)| (id, obj.clone()))
-                                    .collect()
-                            },
+                                    .collect(),
+                                ..Columns::default()
+                            }),
                         ]
                     ).unwrap());
                 },
@@ -101,12 +102,13 @@ impl Server {
 
             self.server.send_message(*client, DefaultChannel::Unreliable, serialize(
                 vec![
-                    ServerMessage::Ecs {
+                    ServerMessage::Ecs(Columns {
                         PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
                             .filter(|(_, obj)| !obj.fixed)
                             .map(|(id, obj)| (id, obj.clone()))
-                            .collect()
-                    },
+                            .collect(),
+                        ..Columns::default()
+                    }),
                 ]
             ).unwrap());
 
