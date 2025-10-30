@@ -84,14 +84,19 @@ impl Server {
                 ServerEvent::ClientConnected { client_id } => {
                     println!("{} connected", client_id);
                     self.server.send_message(client_id, DefaultChannel::ReliableUnordered, serialize(
-                        vec![{
-                            let player = self.shared.ecs.spawn((physobj(
-                                vec3(0.0, 1.0, 0.0),
-                                vec3(1.0, 2.0, 1.0)),
-                            ));
-
-                            ServerMessage::AssignId(player)
-                        }]
+                        vec![
+                            ServerMessage::AssignId(
+                                self.shared.ecs.spawn((physobj(
+                                    vec3(0.0, 1.0, 0.0),
+                                    vec3(1.0, 2.0, 1.0)),
+                                ))
+                            ),
+                            ServerMessage::Shared(SharedMessage::Ecs {
+                                PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
+                                    .map(|(id, obj)| (id, obj.clone()))
+                                    .collect()
+                            }),
+                        ]
                     ).unwrap());
                 },
                 _ => {}
@@ -105,7 +110,10 @@ impl Server {
                 self.server.send_message(*client, DefaultChannel::Unreliable, serialize(
                     vec![
                         ServerMessage::Shared(SharedMessage::Ecs {
-                            PhysicsObject: clone_column!(self, PhysicsObject)
+                            PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
+                                .filter(|(id, obj)| !obj.fixed)
+                                .map(|(id, obj)| (id, obj.clone()))
+                                .collect()
                         }),
                     ]
                 ).unwrap());
