@@ -66,12 +66,12 @@ impl PhysicsObject {
         self
     }
 
-    // fn vel(mut self, vel: Vec3) -> Self {
-    //     self.vel = vel;
-    //     self
-    // }
+    pub fn vel(mut self, vel: Vec3) -> Self {
+        self.vel = vel;
+        self
+    }
 
-    // fn friction(mut self, friction: f32) -> Self {
+    // pub fn friction(mut self, friction: f32) -> Self {
     //     self.friction = friction;
     //     self
     // }

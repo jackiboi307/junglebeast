@@ -54,6 +54,20 @@ impl Server {
             vec3(5.0, 4.0, 1.0)).fixed(),));
     }
 
+    fn spawn_gibs(&mut self, origin: Vec3, target: Vec3) {
+        for i in 0..3 {
+            let mut p = target;
+            p.y += i as f32;
+            let vel = origin.move_towards(target, 3.0);
+            self.shared.ecs.spawn((
+                physobj(
+                    p,
+                    vec3(0.5, 0.5, 0.5)
+                ).vel(vel),
+            ));
+        }
+    }
+
     async fn handle_msg(&mut self, cli_id: ClientId, msg: ClientMessage) {
         let id = self.client_ids[&cli_id];
         match msg {
@@ -62,7 +76,24 @@ impl Server {
                 obj.cube.pos = pos;
                 obj.vel = vel;
             },
-            ClientMessage::Shot(shot_id) => println!("{id:?} has shot {shot_id:?}"),
+            ClientMessage::Shot(shot_id) => {
+                if let Some(target) = {
+
+                    if let Ok((obj, player)) = self.shared.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(shot_id) {
+                        player.hurt(20);
+                        if player.dead() {
+                            let old_pos = obj.cube.pos;
+                            obj.cube.pos = vec3(0.0, 30.0, 0.0);
+                            player.reset_hp();
+                            Some(old_pos)
+                        } else { None }
+                    } else { None }
+
+                } {
+                    let origin = self.shared.ecs.get::<&PhysicsObject>(id).unwrap().cube.pos;
+                    self.spawn_gibs(origin, target);
+                }
+            },
         }
     }
 
@@ -78,7 +109,7 @@ impl Server {
                         vec![
                             ServerMessage::AssignId({
                                 let id = self.shared.ecs.spawn((
-                                    Player {},
+                                    Player::new(),
                                     physobj(
                                         vec3(0.0, 1.0, 0.0),
                                         vec3(1.0, 2.0, 1.0)
@@ -89,7 +120,7 @@ impl Server {
                             }),
                             ServerMessage::Ecs(Columns {
                                 PhysicsObject: clone_column!(self, &PhysicsObject),
-                                Player: clone_column!(self, &Player),
+                                ..Columns::default()
                             }),
                         ]
                     ).unwrap());
@@ -110,7 +141,7 @@ impl Server {
                             .filter(|(_, obj)| !obj.fixed)
                             .map(|(id, obj)| (id, obj.clone()))
                             .collect(),
-                        ..Columns::default()
+                        Player: clone_column!(self, &Player),
                     }),
                 ]
             ).unwrap());
