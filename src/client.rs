@@ -1,12 +1,9 @@
 use crate::*;
 
-use renet::{RenetClient, ServerEvent, DefaultChannel};
+use renet::{RenetClient, DefaultChannel};
 use renet_netcode::NetcodeClientTransport;
-use miniquad::{
-    TextureWrap,
-};
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub struct Client {
     shared: Shared,
@@ -143,15 +140,15 @@ impl Client {
         // see if there is a less complicated way that does not use unsafe,
         // to enable texture repeating
 
-        let backend = unsafe { get_internal_gl().quad_context };
-        let mut new_texture = async |filename| {
-            let image = load_image(filename).await.expect("error loading texture");
-            let id = backend.new_texture_from_rgba8(image.width, image.height, &image.bytes.into_boxed_slice());
-            backend.texture_set_wrap(id, TextureWrap::Repeat, TextureWrap::Repeat);
-            Texture2D::from_miniquad_texture(id)
-        };
+        // let backend = unsafe { get_internal_gl().quad_context };
+        // let mut new_texture = async |filename| {
+        //     let image = load_image(filename).await.expect("error loading texture");
+        //     let id = backend.new_texture_from_rgba8(image.width, image.height, &image.bytes.into_boxed_slice());
+        //     backend.texture_set_wrap(id, TextureWrap::Repeat, TextureWrap::Repeat);
+        //     Texture2D::from_miniquad_texture(id)
+        // };
 
-        self.shared.textures.insert("rust", new_texture("textures/rust.png").await);
+        // self.shared.textures.insert("rust", new_texture("textures/rust.png").await);
 
         // self.textures.insert("rust", Texture2D::from_file_with_format(
         //     include_bytes!("../textures/rust.png"), None));

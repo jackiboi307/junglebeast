@@ -1,15 +1,14 @@
 use std::{
-    net::{SocketAddr, UdpSocket},
+    net::UdpSocket,
     time::SystemTime,
-    sync::mpsc::TryRecvError,
 };
 
 use renet::{
-    ClientId, ConnectionConfig, DefaultChannel, RenetClient, RenetServer, ServerEvent
+    ConnectionConfig, RenetClient, RenetServer
 };
 use renet_netcode::{
     ClientAuthentication, NetcodeClientTransport, NetcodeServerTransport,
-    ServerAuthentication, ServerConfig, NETCODE_USER_DATA_BYTES,
+    ServerAuthentication, ServerConfig
 };
 
 const PROTOCOL_ID: u64 = 7;

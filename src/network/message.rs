@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
 use crate::*;
-use super::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum SharedMessage {

@@ -3,6 +3,10 @@ use renet::{RenetServer, ServerEvent, DefaultChannel};
 use renet_netcode::NetcodeServerTransport;
 use std::time::Duration;
 
+fn physobj(pos: Vec3, size: Vec3) -> PhysicsObject {
+    PhysicsObject::new(Cube::new(pos, size))
+}
+
 pub struct Server {
     shared: Shared,
     server: RenetServer,
@@ -21,9 +25,6 @@ impl Server {
     }
 
     pub async fn start(&mut self) {
-        use std::time::{Duration, Instant};
-        use tokio::time::sleep;
-
         self.create_map();
 
         let mut update   = Interval::new(Duration::from_millis(1000 / 30));
@@ -41,9 +42,6 @@ impl Server {
     }
 
     fn create_map(&mut self) {
-        // self.ecs.spawn((physobj(
-        //     vec3(0.0, 20.0, 0.0),
-        //     vec3(1.0, 1.0, 1.0)),));
         self.shared.ecs.spawn((physobj(
             vec3(0.0, -1.0, 0.0),
             vec3(60.0, 2.0, 60.0)).fixed(),));
@@ -111,7 +109,7 @@ impl Server {
                     vec![
                         ServerMessage::Shared(SharedMessage::Ecs {
                             PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
-                                .filter(|(id, obj)| !obj.fixed)
+                                .filter(|(_, obj)| !obj.fixed)
                                 .map(|(id, obj)| (id, obj.clone()))
                                 .collect()
                         }),

@@ -3,7 +3,6 @@ use hecs::{
     Entity,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::cmp::max;
 
 mod network;
@@ -17,30 +16,6 @@ mod server;
 
 pub use network::*;
 pub use utils::*;
-
-macro_rules! gen_struct {
-    (
-        $svis:vis $sname:ident $( < $lt:lifetime > )?
-        { $($fvis:vis $fname:ident : $t:ty = $e:expr),* $(,)? }
-        $cvis:vis $cname:ident ) => {
-
-        $svis struct $sname $( < $lt > )? {
-            $(
-                $fvis $fname: $t,
-            )*
-        }
-        
-        impl $( < $lt > )? $sname $( < $lt > )? {
-            $cvis fn $cname() -> Self {
-                Self {
-                    $(
-                        $fname: $e,
-                    )*
-                }
-            }
-        }
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Cube {
@@ -84,16 +59,12 @@ impl Cube {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct PhysicsObject {
+pub struct PhysicsObject {
     cube: Cube,
     vel: Vec3,
     friction: f32,
     fixed: bool,
     on_ground: bool,
-}
-
-fn physobj(pos: Vec3, size: Vec3) -> PhysicsObject {
-    PhysicsObject::new(Cube::new(pos, size))
 }
 
 impl PhysicsObject {
@@ -112,10 +83,10 @@ impl PhysicsObject {
         self
     }
 
-    fn vel(mut self, vel: Vec3) -> Self {
-        self.vel = vel;
-        self
-    }
+    // fn vel(mut self, vel: Vec3) -> Self {
+    //     self.vel = vel;
+    //     self
+    // }
 
     // fn friction(mut self, friction: f32) -> Self {
     //     self.friction = friction;
@@ -125,14 +96,12 @@ impl PhysicsObject {
 
 pub struct Shared {
     ecs: hecs::World,
-    textures: HashMap<&'static str, Texture2D>,
 }
 
 impl Shared {
     fn new() -> Self {
         Self {
             ecs: hecs::World::new(),
-            textures: HashMap::new(),
         }
     }
 
@@ -156,9 +125,7 @@ impl Shared {
                         (&mut b[0], &mut a[j])
                     };
 
-                let old_on_ground = obj1.on_ground;
                 obj1.on_ground = obj1.cube.standing_on(&obj2.cube);
-
                 let collide = obj1.cube.intersects(&obj2.cube);
 
                 if obj1.on_ground {
