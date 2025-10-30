@@ -2,6 +2,7 @@ use crate::*;
 use renet::{RenetServer, ServerEvent, DefaultChannel};
 use renet_netcode::NetcodeServerTransport;
 use std::time::Duration;
+use std::collections::HashMap;
 
 fn physobj(pos: Vec3, size: Vec3) -> PhysicsObject {
     PhysicsObject::new(Cube::new(pos, size))
@@ -11,6 +12,7 @@ pub struct Server {
     shared: Shared,
     server: RenetServer,
     transport: NetcodeServerTransport,
+    client_ids: HashMap<ClientId, Entity>,
 }
 
 impl Server {
@@ -21,6 +23,7 @@ impl Server {
             shared: Shared::new(),
             server,
             transport,
+            client_ids: HashMap::new(),
         }
     }
 
@@ -28,15 +31,13 @@ impl Server {
         self.create_map();
 
         let mut update   = Interval::new(Duration::from_millis(1000 / 30));
-        let mut net_send = Interval::new(Duration::from_millis(0));
-        let mut net_recv = Interval::new(Duration::from_millis(0));
 
         loop {
             if update.tick() {
                 let delta = update.delta();
 
                 self.shared.handle_physics(delta.as_secs_f32(), None).await;
-                self.handle_network(delta, net_send.tick(), net_recv.tick()).await;
+                self.handle_network(delta).await;
             }
         }
     }
@@ -53,27 +54,17 @@ impl Server {
             vec3(5.0, 4.0, 1.0)).fixed(),));
     }
 
-    async fn handle_msg(&mut self, msg: ClientMessage) {
+    async fn handle_msg(&mut self, id: ClientId, msg: ClientMessage) {
         match msg {
-            ClientMessage::Shared(msg) => {
-                match msg {
-                    SharedMessage::Ecs {
-                        PhysicsObject,
-                    } => {
-                        for (id, obj) in PhysicsObject {
-                            if self.shared.ecs.entity(id).is_err() {
-                                self.shared.ecs.spawn_at(id, ());
-                            }
-
-                            self.shared.ecs.insert(id, (obj,)).unwrap();
-                        }
-                    }
-                }
+            ClientMessage::PosVel(pos, vel) => {
+                let obj = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(self.client_ids[&id]).unwrap();
+                obj.cube.pos = pos;
+                obj.vel = vel;
             }
         }
     }
 
-    async fn handle_network(&mut self, duration: Duration, send: bool, recv: bool) {
+    async fn handle_network(&mut self, duration: Duration) {
         self.server.update(duration);
         self.transport.update(duration, &mut self.server).unwrap();
 
@@ -83,17 +74,19 @@ impl Server {
                     println!("{} connected", client_id);
                     self.server.send_message(client_id, DefaultChannel::ReliableUnordered, serialize(
                         vec![
-                            ServerMessage::AssignId(
-                                self.shared.ecs.spawn((physobj(
+                            ServerMessage::AssignId({
+                                let id = self.shared.ecs.spawn((physobj(
                                     vec3(0.0, 1.0, 0.0),
                                     vec3(1.0, 2.0, 1.0)),
-                                ))
-                            ),
-                            ServerMessage::Shared(SharedMessage::Ecs {
+                                ));
+                                self.client_ids.insert(client_id, id);
+                                id
+                            }),
+                            ServerMessage::Ecs {
                                 PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
                                     .map(|(id, obj)| (id, obj.clone()))
                                     .collect()
-                            }),
+                            },
                         ]
                     ).unwrap());
                 },
@@ -101,33 +94,31 @@ impl Server {
             }
         }
 
-        let mut msgs: ClientMessages = Vec::new();
+        let mut msgs: Vec<(ClientId, ClientMessages)> = Vec::new();
 
         for client in self.server.clients_id_iter().collect::<Vec<_>>().iter() {
-            if send {
-                self.server.send_message(*client, DefaultChannel::Unreliable, serialize(
-                    vec![
-                        ServerMessage::Shared(SharedMessage::Ecs {
-                            PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
-                                .filter(|(_, obj)| !obj.fixed)
-                                .map(|(id, obj)| (id, obj.clone()))
-                                .collect()
-                        }),
-                    ]
-                ).unwrap());
-            }
+            msgs.push((*client, Vec::new()));
 
-            if recv {
-                for channel in NET_CHANNELS {
-                    while let Some(ref data) = self.server.receive_message(*client, channel) {
-                        match deserialize::<ClientMessages>(data) {
-                            Ok(new_msgs) =>
-                                for msg in new_msgs {
-                                    msgs.push(msg);
-                                }
-                            Err(err) => 
-                                eprintln!("{}", err)
-                        }
+            self.server.send_message(*client, DefaultChannel::Unreliable, serialize(
+                vec![
+                    ServerMessage::Ecs {
+                        PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
+                            .filter(|(_, obj)| !obj.fixed)
+                            .map(|(id, obj)| (id, obj.clone()))
+                            .collect()
+                    },
+                ]
+            ).unwrap());
+
+            for channel in NET_CHANNELS {
+                while let Some(ref data) = self.server.receive_message(*client, channel) {
+                    match deserialize::<ClientMessages>(data) {
+                        Ok(new_msgs) =>
+                            for msg in new_msgs {
+                                msgs.last_mut().unwrap().1.push(msg);
+                            }
+                        Err(err) => 
+                            eprintln!("{}", err)
                     }
                 }
             }
@@ -135,8 +126,10 @@ impl Server {
 
         self.transport.send_packets(&mut self.server);
 
-        for msg in msgs {
-            self.handle_msg(msg).await;
+        for (id, msgs) in msgs {
+            for msg in msgs {
+                self.handle_msg(id, msg).await;
+            }
         }
     }
 }

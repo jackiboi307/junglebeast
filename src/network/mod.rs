@@ -12,3 +12,5 @@ pub const NET_CHANNELS: [u8; 2] = [
     0, // DefaultChannel::Unreliable
     1, // DefaultChannel::ReliableUnordered
 ];
+
+pub type ClientId = u64;

@@ -2,23 +2,18 @@
 
 use crate::*;
 
+pub type ServerMessages = Vec<ServerMessage>;
+pub type ClientMessages = Vec<ClientMessage>;
+
 #[derive(Debug, Serialize, Deserialize)]
-pub enum SharedMessage {
+pub enum ServerMessage {
+    AssignId(Entity),
     Ecs {
         PhysicsObject: Vec<(Entity, PhysicsObject)>,
     },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum ServerMessage {
-    Shared(SharedMessage),
-    AssignId(Entity),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
-    Shared(SharedMessage),
+    PosVel(Vec3, Vec3),
 }
-
-pub type ServerMessages = Vec<ServerMessage>;
-pub type ClientMessages = Vec<ClientMessage>;

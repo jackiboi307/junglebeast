@@ -40,9 +40,6 @@ impl Client {
         let move_speed = 0.1;
         let look_speed = 0.1;
 
-        let mut net_send = Interval::new(Duration::from_millis(0));
-        let mut net_recv = Interval::new(Duration::from_millis(0));
-
         let mut grabbed = true;
         set_cursor_grab(grabbed);
         show_mouse(!grabbed);
@@ -104,7 +101,7 @@ impl Client {
             }
 
             self.shared.handle_physics(delta, do_jump).await;
-            self.handle_network(Duration::from_secs_f32(delta), net_send.tick(), net_recv.tick()).await;
+            self.handle_network(Duration::from_secs_f32(delta)).await;
 
             // if is_mouse_button_pressed(MouseButton::Left) {
             //     self.ecs.spawn((physobj(
@@ -156,21 +153,17 @@ impl Client {
 
     async fn handle_msg(&mut self, msg: ServerMessage) {
         match msg {
-            ServerMessage::Shared(msg) => {
-                match msg {
-                    SharedMessage::Ecs {
-                        PhysicsObject,
-                    } => {
-                        for (id, obj) in PhysicsObject {
-                            if self.shared.ecs.entity(id).is_err() {
-                                self.shared.ecs.spawn_at(id, (obj,));
-                            } else {
-                                if let Ok(new_obj) = self.shared.ecs.query_one_mut::<&PhysicsObject>(id) {
-                                    let dist = new_obj.cube.pos.distance(obj.cube.pos);
-                                    if id != self.player || dist > 2.0 {
-                                        self.shared.ecs.insert(id, (obj,)).unwrap();
-                                    }
-                                }
+            ServerMessage::Ecs {
+                PhysicsObject,
+            } => {
+                for (id, obj) in PhysicsObject {
+                    if self.shared.ecs.entity(id).is_err() {
+                        self.shared.ecs.spawn_at(id, (obj,));
+                    } else {
+                        if let Ok(new_obj) = self.shared.ecs.query_one_mut::<&PhysicsObject>(id) {
+                            let dist = new_obj.cube.pos.distance(obj.cube.pos);
+                            if id != self.player || dist > 2.0 {
+                                self.shared.ecs.insert(id, (obj,)).unwrap();
                             }
                         }
                     }
@@ -182,40 +175,35 @@ impl Client {
         }
     }
 
-    async fn handle_network(&mut self, duration: Duration, send: bool, recv: bool) {
+    async fn handle_network(&mut self, duration: Duration) {
         self.client.update(duration);
         self.transport.update(duration, &mut self.client).unwrap();
 
-        let mut msgs: Vec<_> = Vec::new();
+        let mut msgs = Vec::new();
 
         if self.client.is_connected() {
-            if recv {
-                for channel in NET_CHANNELS {
-                    while let Some(ref data) = self.client.receive_message(channel) {
-                        match deserialize::<ServerMessages>(data) {
-                            Ok(new_msgs) =>
-                                for msg in new_msgs {
-                                    msgs.push(msg);
-                                }
-                            Err(err) => 
-                                eprintln!("{}", err)
-                        }
+            for channel in NET_CHANNELS {
+                while let Some(ref data) = self.client.receive_message(channel) {
+                    match deserialize::<ServerMessages>(data) {
+                        Ok(new_msgs) =>
+                            for msg in new_msgs {
+                                msgs.push(msg);
+                            }
+                        Err(err) => 
+                            eprintln!("{}", err)
                     }
                 }
             }
 
-            if send {
-                if self.shared.ecs.entity(self.player).is_ok() {
-                    self.client.send_message(DefaultChannel::Unreliable, serialize(
-                        vec![
-                            ClientMessage::Shared(SharedMessage::Ecs {
-                                PhysicsObject: vec![(self.player,
-                                    self.shared.ecs.query_one::<&PhysicsObject>(self.player)
-                                    .unwrap().get().unwrap().clone())],
-                            }),
-                        ]
-                    ).unwrap());
-                }
+            if self.shared.ecs.entity(self.player).is_ok() {
+                self.client.send_message(DefaultChannel::Unreliable, serialize(
+                    vec![
+                        {
+                            let obj = self.shared.ecs.get::<&PhysicsObject>(self.player).unwrap();
+                            ClientMessage::PosVel(obj.cube.pos, obj.vel)
+                        },
+                    ]
+                ).unwrap());
             }
         }
 
