@@ -27,8 +27,8 @@ impl Server {
         self.create_map();
 
         let mut update   = Interval::new(Duration::from_millis(1000 / 30));
-        let mut net_send = Interval::new(Duration::from_millis(200));
-        let mut net_recv = Interval::new(Duration::from_millis(200));
+        let mut net_send = Interval::new(Duration::from_millis(0));
+        let mut net_recv = Interval::new(Duration::from_millis(0));
 
         loop {
             if update.tick() {

@@ -43,8 +43,8 @@ impl Client {
         let move_speed = 0.1;
         let look_speed = 0.1;
 
-        let mut net_send = Interval::new(Duration::from_millis(200));
-        let mut net_recv = Interval::new(Duration::from_millis(200));
+        let mut net_send = Interval::new(Duration::from_millis(0));
+        let mut net_recv = Interval::new(Duration::from_millis(0));
 
         let mut grabbed = true;
         set_cursor_grab(grabbed);
