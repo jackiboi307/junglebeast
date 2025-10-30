@@ -46,22 +46,33 @@ impl Client {
         let mut net_send = Interval::new(Duration::from_millis(200));
         let mut net_recv = Interval::new(Duration::from_millis(200));
 
-        set_cursor_grab(true);
-        show_mouse(false);
+        let mut grabbed = true;
+        set_cursor_grab(grabbed);
+        show_mouse(!grabbed);
 
         loop {
             let delta = get_frame_time();
 
+            if (grabbed && is_key_pressed(KeyCode::Escape))
+                || (!grabbed && is_mouse_button_pressed(MouseButton::Left)) {
+
+                grabbed = !grabbed;
+                set_cursor_grab(grabbed);
+                show_mouse(!grabbed);
+            }
+
             let mouse_position: Vec2 = mouse_position().into();
             let mouse_delta = mouse_position - last_mouse_position;
 
-            last_mouse_position = mouse_position;
+            if grabbed {
+                last_mouse_position = mouse_position;
 
-            yaw += mouse_delta.x * delta * look_speed;
-            pitch += mouse_delta.y * delta * -look_speed;
+                yaw += mouse_delta.x * delta * look_speed;
+                pitch += mouse_delta.y * delta * -look_speed;
 
-            pitch = if pitch > 1.5 { 1.5 } else { pitch };
-            pitch = if pitch < -1.5 { -1.5 } else { pitch };
+                pitch = if pitch > 1.5 { 1.5 } else { pitch };
+                pitch = if pitch < -1.5 { -1.5 } else { pitch };
+            }
 
             let front = vec3(
                 yaw.cos() * pitch.cos(),
@@ -159,7 +170,7 @@ impl Client {
                             } else {
                                 if let Ok(new_obj) = self.shared.ecs.query_one_mut::<&PhysicsObject>(id) {
                                     let dist = new_obj.cube.pos.distance(obj.cube.pos);
-                                    if dist > 2.0 {
+                                    if id != self.player || dist > 2.0 {
                                         self.shared.ecs.insert(id, (obj,)).unwrap();
                                     }
                                 }
