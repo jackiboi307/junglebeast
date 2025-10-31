@@ -8,9 +8,10 @@ mod utils;
 pub use utils::*;
 
 // https://docs.rs/renet/1.2.0/src/renet/channel/mod.rs.html
-pub const NET_CHANNELS: [u8; 2] = [
+pub const NET_CHANNELS: [u8; 3] = [
     0, // DefaultChannel::Unreliable
     1, // DefaultChannel::ReliableUnordered
+    2, // DefaultChannel::ReliableOrdered
 ];
 
 pub type ClientId = u64;

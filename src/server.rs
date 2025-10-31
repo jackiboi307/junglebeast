@@ -30,14 +30,22 @@ impl Server {
     pub async fn start(&mut self) {
         self.create_map();
 
-        let mut update   = Interval::new(Duration::from_millis(1000 / 30));
+        let mut update = Interval::new(Duration::from_millis(1000 / 30));
+        let mut dt_accumulator = 0.0;
 
         loop {
             if update.tick() {
                 let delta = update.delta();
+                dt_accumulator += delta.as_secs_f32();
 
-                self.shared.handle_physics(delta.as_secs_f32(), None).await;
-                self.handle_network(delta).await;
+                self.network_receive(delta).await;
+
+                while dt_accumulator >= PHYSICS_STEP {
+                    self.shared.handle_physics(PHYSICS_STEP).await;
+                    dt_accumulator -= PHYSICS_STEP;
+                }
+
+                self.network_send().await;
             }
         }
     }
@@ -54,28 +62,43 @@ impl Server {
             vec3(5.0, 4.0, 1.0)).fixed(),));
     }
 
-    fn spawn_gibs(&mut self, origin: Vec3, target: Vec3) {
-        for i in 0..3 {
-            let mut p = target;
-            p.y += i as f32;
-            let vel = origin.move_towards(target, 3.0);
-            self.shared.ecs.spawn((
-                physobj(
-                    p,
-                    vec3(0.5, 0.5, 0.5)
-                ).vel(vel),
-            ));
+    fn spawn_gibs(&mut self, target: Vec3) {
+        for x in 0..2 {
+            for z in 0..2 {
+                let x = (x * 2 - 1) as f32;
+                let z = (z * 2 - 1) as f32;
+                self.shared.ecs.spawn((
+                    physobj(
+                        target + vec3(x / 2.0, 0.0, z / 2.0),
+                        vec3(0.5, 0.5, 0.5)
+                    ).vel(vec3(x, 10.0, z)),
+                ));
+            }
         }
+
+        self.shared.ecs.spawn((
+            physobj(
+                target + vec3(0.0, 1.0, 0.0),
+                vec3(0.5, 0.5, 0.5)
+            ).vel(vec3(0.0, 10.0, 0.0)),
+        ));
     }
 
     async fn handle_msg(&mut self, cli_id: ClientId, msg: ClientMessage) {
         let id = self.client_ids[&cli_id];
         match msg {
-            ClientMessage::PosVel(pos, vel) => {
-                let obj = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(id).unwrap();
-                obj.cube.pos = pos;
-                obj.vel = vel;
+            ClientMessage::SetMoveState(state) => {
+                if let Ok(mut player) = self.shared.ecs.get::<&mut Player>(id) {
+                    let jumping = player.moves.jump;
+                    player.moves = state;
+                    player.moves.jump = jumping || player.moves.jump;
+                }
             },
+            ClientMessage::SetRotation(rot) => {
+                if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(id) {
+                    obj.cube.rot = rot;
+                }
+            }
             ClientMessage::Shot(shot_id) => {
                 if let Some(target) = {
 
@@ -83,21 +106,20 @@ impl Server {
                         player.hurt(20);
                         if player.dead() {
                             let old_pos = obj.cube.pos;
-                            obj.cube.pos = vec3(0.0, 30.0, 0.0);
+                            obj.cube.pos = vec3(0.0, 60.0, 0.0);
                             player.reset_hp();
                             Some(old_pos)
                         } else { None }
                     } else { None }
 
                 } {
-                    let origin = self.shared.ecs.get::<&PhysicsObject>(id).unwrap().cube.pos;
-                    self.spawn_gibs(origin, target);
+                    self.spawn_gibs(target);
                 }
             },
         }
     }
 
-    async fn handle_network(&mut self, duration: Duration) {
+    async fn network_receive(&mut self, duration: Duration) {
         self.server.update(duration);
         self.transport.update(duration, &mut self.server).unwrap();
 
@@ -129,11 +151,24 @@ impl Server {
             }
         }
 
-        let mut msgs: Vec<(ClientId, ClientMessages)> = Vec::new();
-
         for client in self.server.clients_id_iter().collect::<Vec<_>>().iter() {
-            msgs.push((*client, Vec::new()));
+            for channel in NET_CHANNELS {
+                while let Some(ref data) = self.server.receive_message(*client, channel) {
+                    match deserialize::<ClientMessages>(data) {
+                        Ok(new_msgs) =>
+                            for msg in new_msgs {
+                                self.handle_msg(*client, msg).await;
+                            }
+                        Err(err) => 
+                            eprintln!("{}", err)
+                    }
+                }
+            }
+        }
+    }
 
+    async fn network_send(&mut self) {
+        for client in self.server.clients_id_iter().collect::<Vec<_>>().iter() {
             self.server.send_message(*client, DefaultChannel::Unreliable, serialize(
                 vec![
                     ServerMessage::Ecs(Columns {
@@ -145,27 +180,8 @@ impl Server {
                     }),
                 ]
             ).unwrap());
-
-            for channel in NET_CHANNELS {
-                while let Some(ref data) = self.server.receive_message(*client, channel) {
-                    match deserialize::<ClientMessages>(data) {
-                        Ok(new_msgs) =>
-                            for msg in new_msgs {
-                                msgs.last_mut().unwrap().1.push(msg);
-                            }
-                        Err(err) => 
-                            eprintln!("{}", err)
-                    }
-                }
-            }
         }
 
         self.transport.send_packets(&mut self.server);
-
-        for (id, msgs) in msgs {
-            for msg in msgs {
-                self.handle_msg(id, msg).await;
-            }
-        }
     }
 }

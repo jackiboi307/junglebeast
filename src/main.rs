@@ -19,6 +19,8 @@ pub use network::*;
 pub use utils::*;
 pub use components::*;
 
+const PHYSICS_STEP: f32 = 1.0 / 60.0;
+
 pub struct Shared {
     ecs: hecs::World,
 }
@@ -30,50 +32,67 @@ impl Shared {
         }
     }
 
-    async fn handle_physics(&mut self, dt: f32, do_jump: Option<Entity>) {
-        let mut bind = self.ecs.query::<(&mut PhysicsObject,)>();
-        let (mut phys_objs, ids): (Vec<_>, Vec<_>) =
-            bind.iter().map(|(id, (e,))| (e, id)).unzip();
-        let len = phys_objs.len();
+    async fn handle_physics(&mut self, dt: f32) {
+        let ids: Vec<Entity> = self.ecs.query::<(&PhysicsObject,)>().iter().map(|(id, _)| id).collect();
+        let len = ids.len();
 
         for i in 0..len {
-            let obj = &mut phys_objs[i];
-            obj.vel.y -= 10.0 * dt;
+            {
+                let mut obj = self.ecs.get::<&mut PhysicsObject>(ids[i]).unwrap();
+                obj.vel.y -= 10.0 * dt;
+                obj.on_ground = false;
+            }
 
             for j in 0..len {
                 if i == j { continue }
-                let (a, b) = phys_objs.split_at_mut(max(i, j));
-                let (obj1, obj2) =
-                    if i < j {
-                        (&mut a[i], &mut b[0])
-                    } else {
-                        (&mut b[0], &mut a[j])
-                    };
+                let [obj1, obj2] = self.ecs.query_many_mut::<&mut PhysicsObject, 2>([ids[i], ids[j]]);
+                let obj1 = obj1.unwrap();
+                let obj2 = obj2.unwrap();
 
-                obj1.on_ground = obj1.cube.standing_on(&obj2.cube);
+                let on_ground = obj1.cube.standing_on(&obj2.cube);
                 let collide = obj1.cube.intersects(&obj2.cube);
 
-                if obj1.on_ground {
+                obj1.on_ground = obj1.on_ground || on_ground;
+
+                if on_ground {
                     let friction = obj2.friction;
                     obj1.vel.x /= friction;
                     obj1.vel.z /= friction;
                     obj1.vel.y = 0.0;
-
-                    if let Some(id) = do_jump {
-                        if ids[i] == id {
-                            obj1.vel.y = 5.0;
-                        }
-                    }
 
                 } else if collide {
                     obj1.vel = (obj1.cube.pos - obj2.cube.pos).normalize();
                 }
             }
 
-            let obj = phys_objs.get_mut(i).unwrap();
+            let mut obj = {
+                if let Ok((obj, player)) = self.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(ids[i]) {
+                    Self::handle_movement(&mut player.moves, obj);
+                    obj
+                } else {
+                    &mut self.ecs.get::<&mut PhysicsObject>(ids[i]).unwrap()
+                }
+            };
+
+            let vel = obj.vel;
             if !obj.fixed {
-                obj.cube.pos += obj.vel * dt;
+                obj.cube.pos += vel * dt;
             }
+        }
+    }
+
+    fn handle_movement(state: &mut MoveState, obj: &mut PhysicsObject) {
+        let move_speed = 0.1;
+        let step_ws = vec3(obj.cube.rot.z, obj.cube.rot.y, -obj.cube.rot.x) * move_speed;
+        let step_ad = obj.cube.rot * move_speed;
+
+        if state.forward    { obj.vel += step_ws; }
+        if state.back       { obj.vel -= step_ws; }
+        if state.left       { obj.vel -= step_ad; }
+        if state.right      { obj.vel += step_ad; }
+
+        if state.get_jump() && obj.on_ground {
+            obj.vel.y += 5.0;
         }
     }
 

@@ -37,15 +37,17 @@ impl Client {
 
         let mut last_mouse_position: Vec2 = mouse_position().into();
 
-        let move_speed = 0.1;
         let look_speed = 0.1;
 
         let mut grabbed = true;
         set_cursor_grab(grabbed);
         show_mouse(!grabbed);
 
+        let mut dt_accumulator = 0.0;
+
         loop {
             let delta = get_frame_time();
+            dt_accumulator += delta;
 
             if (grabbed && is_key_pressed(KeyCode::Escape))
                 || (!grabbed && is_mouse_button_pressed(MouseButton::Left)) {
@@ -84,33 +86,35 @@ impl Client {
                 switch = !switch;
             }
 
-            let mut do_jump = None;
-
-            if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(self.player) {
-                let step_ws = vec3(obj.cube.rot.z, obj.cube.rot.y, -obj.cube.rot.x) * move_speed;
-                let step_ad = obj.cube.rot * move_speed;
-
-                if is_key_down(KeyCode::W) { obj.vel += step_ws; }
-                if is_key_down(KeyCode::S) { obj.vel -= step_ws; }
-                if is_key_down(KeyCode::A) { obj.vel -= step_ad; }
-                if is_key_down(KeyCode::D) { obj.vel += step_ad; }
-
-                if is_key_pressed(KeyCode::Space) {
-                    do_jump = Some(self.player);
-                }
-            }
-
             let mut messages = ClientMessages::new();
 
+            if let Ok((obj, player)) = self.shared.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(self.player) {
+                player.moves.reset();
+
+                messages.push(ClientMessage::SetRotation(obj.cube.rot));
+
+                if is_key_down(KeyCode::W) { player.moves.forward = true; }
+                if is_key_down(KeyCode::S) { player.moves.back = true; }
+                if is_key_down(KeyCode::A) { player.moves.left = true; }
+                if is_key_down(KeyCode::D) { player.moves.right = true; }
+
+                if is_key_pressed(KeyCode::Space) {
+                    player.moves.set_jump();
+                }
+
+                messages.push(ClientMessage::SetMoveState(player.moves.clone()));
+            }
+
             if self.shared.ecs.entity(self.player).is_ok() {
-                self.shared.handle_physics(delta, do_jump).await;
+                while dt_accumulator >= PHYSICS_STEP {
+                    self.shared.handle_physics(PHYSICS_STEP).await;
+                    dt_accumulator -= PHYSICS_STEP;
+                }
 
-                let (pos, vel, up) = {
+                let (pos, up) = {
                     let obj = self.shared.ecs.get::<&PhysicsObject>(self.player).unwrap();
-                    (obj.cube.pos, obj.vel, obj.clone().cube.rot.cross(front).normalize())
+                    (obj.cube.pos, obj.clone().cube.rot.cross(front).normalize())
                 };
-
-                messages.push(ClientMessage::PosVel(pos, vel));
 
                 if is_mouse_button_pressed(MouseButton::Left) {
                     if let Some((_, id)) = self.shared.ray_intersection(pos, front, &[self.player]) {
@@ -168,14 +172,16 @@ impl Client {
     async fn handle_msg(&mut self, msg: ServerMessage) {
         match msg {
             ServerMessage::Ecs(columns) => {
-                for (id, obj) in columns.PhysicsObject {
+                for (id, new_obj) in columns.PhysicsObject {
                     if self.shared.ecs.entity(id).is_err() {
-                        self.shared.ecs.spawn_at(id, (obj,));
+                        self.shared.ecs.spawn_at(id, (new_obj,));
                     } else {
-                        if let Ok(new_obj) = self.shared.ecs.query_one_mut::<&PhysicsObject>(id) {
-                            let dist = new_obj.cube.pos.distance(obj.cube.pos);
-                            if id != self.player || dist > 2.0 {
-                                self.shared.ecs.insert(id, (obj,)).unwrap();
+                        if let Ok(obj) = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(id) {
+                            let old_pos = obj.cube.pos;
+                            let dist = obj.cube.pos.distance(new_obj.cube.pos);
+                            *obj = new_obj;
+                            if dist < 0.5 {
+                                obj.cube.pos = old_pos.move_towards(obj.cube.pos, 0.05);
                             }
                         }
                     }
@@ -198,6 +204,10 @@ impl Client {
         let mut msgs = Vec::new();
 
         if self.client.is_connected() {
+            self.client.send_message(DefaultChannel::ReliableOrdered,
+                serialize(send_msgs).unwrap()
+            );
+
             for channel in NET_CHANNELS {
                 while let Some(ref data) = self.client.receive_message(channel) {
                     match deserialize::<ServerMessages>(data) {
@@ -210,10 +220,6 @@ impl Client {
                     }
                 }
             }
-
-            self.client.send_message(DefaultChannel::Unreliable,
-                serialize(send_msgs).unwrap()
-            );
         }
 
         self.transport.send_packets(&mut self.client).unwrap();
@@ -240,5 +246,10 @@ impl Client {
         draw_line(center.0, center.1 - crosshair_size, center.0, center.1 + crosshair_size, 1.0, BLACK);
 
         draw_text("JUNGLEBEAST", 10.0, 30.0, 30.0, RED);
+
+        if let Some((obj, player)) = self.shared.ecs.query_one::<(&PhysicsObject, &Player)>(self.player).unwrap().get() {
+            let text = format!("fps: {}, hp: {} pos: {:.1} vel: {:.1}", get_fps(), player.hp(), obj.cube.pos, obj.vel);
+            draw_text(&text, 10.0, 55.0, 30.0, GRAY);
+        }
     }
 }

@@ -13,7 +13,8 @@ pub enum ServerMessage {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
-    PosVel(Vec3, Vec3),
+    SetMoveState(MoveState),
+    SetRotation(Vec3),
     Shot(Entity),
 }
 
