@@ -23,5 +23,6 @@ type Column<T> = Vec<(Entity, T)>;
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct Columns {
     pub PhysicsObject: Column<PhysicsObject>,
+    pub MeshWrapper:   Column<MeshWrapper>,
     pub Player:        Column<Player>,
 }

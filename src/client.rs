@@ -10,6 +10,8 @@ pub struct Client {
     client: RenetClient,
     transport: NetcodeClientTransport,
     player: Entity,
+
+    test_mesh: Option<Mesh>,
 }
 
 impl Client {
@@ -21,6 +23,8 @@ impl Client {
             client,
             transport,
             player: Entity::DANGLING,
+            
+            test_mesh: None,
         }
     }
 
@@ -179,9 +183,10 @@ impl Client {
                         if let Ok(obj) = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(id) {
                             let old_pos = obj.cube.pos;
                             let dist = obj.cube.pos.distance(new_obj.cube.pos);
+                            // println!("{dist}");
                             *obj = new_obj;
                             if dist < 0.5 {
-                                obj.cube.pos = old_pos.move_towards(obj.cube.pos, 0.05);
+                                obj.cube.pos = old_pos.move_towards(obj.cube.pos, 0.005);
                             }
                         }
                     }
@@ -189,6 +194,10 @@ impl Client {
 
                 for (id, obj) in columns.Player {
                     self.shared.ecs.insert(id, (obj,)).unwrap();
+                }
+
+                for (_, wrapper) in columns.MeshWrapper {
+                    self.test_mesh = Some(wrapper.to_mesh());
                 }
             },
             ServerMessage::AssignId(id) => {
@@ -236,6 +245,10 @@ impl Client {
             if id != self.player {
                 draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
             }
+        }
+
+        if let Some(mesh) = &self.test_mesh {
+            draw_mesh(mesh);
         }
     
         set_default_camera();

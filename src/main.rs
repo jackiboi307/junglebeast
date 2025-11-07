@@ -3,7 +3,6 @@ use hecs::{
     Entity,
 };
 use serde::{Deserialize, Serialize};
-use std::cmp::max;
 
 mod network;
 mod utils;
@@ -15,11 +14,12 @@ mod client;
 #[cfg(server)]
 mod server;
 
-pub use network::*;
-pub use utils::*;
-pub use components::*;
+use network::*;
+use utils::*;
+use components::*;
 
 const PHYSICS_STEP: f32 = 1.0 / 60.0;
+const TEST_MAP: &'static str = "maps/test.glb";
 
 pub struct Shared {
     ecs: hecs::World,
@@ -32,6 +32,32 @@ impl Shared {
         }
     }
 
+    async fn load_map(&mut self, path: String) {
+        let scenes = easy_gltf::load(path).unwrap();
+        let scene = scenes.get(0).unwrap();
+
+        for model in &scene.models {
+            self.ecs.spawn((
+                MeshWrapper {
+                    vertices: model.vertices().iter().map(|v| VertexWrapper {
+                        position: vec3(v.position.x, v.position.y, v.position.z),
+                        color: [255, 255, 255, 255],
+                        uv: vec2(v.tex_coords.x, v.tex_coords.y),
+                        normal: vec4(v.normal.x, v.normal.y, v.normal.z, 1.0),
+                    }).collect(),
+                    indices: model.indices().unwrap().iter().map(|i| *i as u16).collect(),
+                    texture: if let Some(texture) = model.material().pbr.base_color_texture.clone() {
+                        Some(ImageWrapper {
+                            width: texture.width().try_into().unwrap(),
+                            height: texture.height().try_into().unwrap(),
+                            bytes: texture.as_raw().to_vec(),
+                        })
+                    } else { None }
+                },
+            ));
+        }
+    }
+
     async fn handle_physics(&mut self, dt: f32) {
         let ids: Vec<Entity> = self.ecs.query::<(&PhysicsObject,)>().iter().map(|(id, _)| id).collect();
         let len = ids.len();
@@ -39,7 +65,7 @@ impl Shared {
         for i in 0..len {
             {
                 let mut obj = self.ecs.get::<&mut PhysicsObject>(ids[i]).unwrap();
-                obj.vel.y -= 10.0 * dt;
+                // obj.vel.y -= 10.0 * dt;
                 obj.on_ground = false;
             }
 
@@ -65,7 +91,7 @@ impl Shared {
                 }
             }
 
-            let mut obj = {
+            let obj = {
                 if let Ok((obj, player)) = self.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(ids[i]) {
                     Self::handle_movement(&mut player.moves, obj);
                     obj

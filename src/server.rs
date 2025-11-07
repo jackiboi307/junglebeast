@@ -28,7 +28,8 @@ impl Server {
     }
 
     pub async fn start(&mut self) {
-        self.create_map();
+        // self.create_map();
+        self.shared.load_map(TEST_MAP.to_string()).await;
 
         let mut update = Interval::new(Duration::from_millis(1000 / 30));
         let mut dt_accumulator = 0.0;
@@ -50,17 +51,17 @@ impl Server {
         }
     }
 
-    fn create_map(&mut self) {
-        self.shared.ecs.spawn((physobj(
-            vec3(0.0, -1.0, 0.0),
-            vec3(60.0, 2.0, 60.0)).fixed(),));
-        self.shared.ecs.spawn((physobj(
-            vec3(0.0, 0.5, 5.0),
-            vec3(5.0, 1.0, 1.0)).fixed(),));
-        self.shared.ecs.spawn((physobj(
-            vec3(0.0, 2.0, -5.0),
-            vec3(5.0, 4.0, 1.0)).fixed(),));
-    }
+    // fn create_map(&mut self) {
+    //     // self.shared.ecs.spawn((physobj(
+    //     //     vec3(0.0, -1.0, 0.0),
+    //     //     vec3(60.0, 2.0, 60.0)).fixed(),));
+    //     self.shared.ecs.spawn((physobj(
+    //         vec3(0.0, 0.5, 5.0),
+    //         vec3(5.0, 1.0, 1.0)).fixed(),));
+    //     self.shared.ecs.spawn((physobj(
+    //         vec3(0.0, 2.0, -5.0),
+    //         vec3(5.0, 4.0, 1.0)).fixed(),));
+    // }
 
     fn spawn_gibs(&mut self, target: Vec3) {
         for x in 0..2 {
@@ -133,7 +134,7 @@ impl Server {
                                 let id = self.shared.ecs.spawn((
                                     Player::new(),
                                     physobj(
-                                        vec3(0.0, 1.0, 0.0),
+                                        vec3(0.0, 3.0, 0.0),
                                         vec3(1.0, 2.0, 1.0)
                                     ),
                                 ));
@@ -142,6 +143,7 @@ impl Server {
                             }),
                             ServerMessage::Ecs(Columns {
                                 PhysicsObject: clone_column!(self, &PhysicsObject),
+                                MeshWrapper: clone_column!(self, &MeshWrapper),
                                 ..Columns::default()
                             }),
                         ]
@@ -177,6 +179,7 @@ impl Server {
                             .map(|(id, obj)| (id, obj.clone()))
                             .collect(),
                         Player: clone_column!(self, &Player),
+                        ..Columns::default()
                     }),
                 ]
             ).unwrap());
