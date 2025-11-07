@@ -1,0 +1,4 @@
+#!/bin/sh
+mode="$1"
+shift
+cargo $mode --bin client $@

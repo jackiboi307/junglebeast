@@ -1,38 +1,32 @@
-use macroquad::prelude::*;
-use hecs::{
+pub use macroquad::prelude::*;
+pub use hecs::{
     Entity,
 };
-use serde::{Deserialize, Serialize};
+pub use parry3d::{
+    shape::TriMesh,
+    math::Point,
+};
+pub use serde::{Deserialize, Serialize};
 
-mod network;
-mod utils;
-mod components;
+pub use crate::network::*;
+pub use crate::utils::*;
+pub use crate::components::*;
 
-#[cfg(not(server))]
-mod client;
-
-#[cfg(server)]
-mod server;
-
-use network::*;
-use utils::*;
-use components::*;
-
-const PHYSICS_STEP: f32 = 1.0 / 60.0;
-const TEST_MAP: &'static str = "maps/test.glb";
+pub const PHYSICS_STEP: f32 = 1.0 / 60.0;
+pub const TEST_MAP: &'static str = "maps/test.glb";
 
 pub struct Shared {
-    ecs: hecs::World,
+    pub ecs: hecs::World,
 }
 
 impl Shared {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             ecs: hecs::World::new(),
         }
     }
 
-    async fn load_map(&mut self, path: String) {
+    pub async fn load_map(&mut self, path: String) {
         let scenes = easy_gltf::load(path).unwrap();
         let scene = scenes.get(0).unwrap();
 
@@ -54,11 +48,16 @@ impl Shared {
                         })
                     } else { None }
                 },
+
+                TriMesh::new(
+                    model.vertices().iter().map(|v| Point::new(v.position.x, v.position.y, v.position.z)).collect(),
+                    model.indices().unwrap().chunks_exact(3).map(|i| [i[0], i[1], i[2]]).collect(),
+                ).unwrap(),
             ));
         }
     }
 
-    async fn handle_physics(&mut self, dt: f32) {
+    pub async fn handle_physics(&mut self, dt: f32) {
         let ids: Vec<Entity> = self.ecs.query::<(&PhysicsObject,)>().iter().map(|(id, _)| id).collect();
         let len = ids.len();
 
@@ -122,7 +121,7 @@ impl Shared {
         }
     }
 
-    fn ray_intersection(&self, origin: Vec3, dir: Vec3, ignore_ids: &[Entity]) -> Option<(Vec3, Entity)> {
+    pub fn ray_intersection(&self, origin: Vec3, dir: Vec3, ignore_ids: &[Entity]) -> Option<(Vec3, Entity)> {
         // mainly ai generated!
 
         let mut result: Option<(Vec3, Entity)> = None;
@@ -172,37 +171,10 @@ impl Shared {
     }
 }
 
-#[cfg(not(server))]
-fn conf() -> Conf {
-    Conf {
-        window_title: String::from("JUNGLEBEAST"),
-        window_width: 1260,
-        window_height: 768,
-        fullscreen: false,
-        ..Default::default()
-    }
-}
-
-use clap::{Parser, arg};
+pub use clap::{Parser, arg};
 
 #[derive(Parser)]
-struct Args {
+pub struct Args {
     #[arg(help = "ip:port")]
-    addr: String,
-}
-
-#[cfg(not(server))]
-#[macroquad::main(conf)]
-async fn main() {
-    let args = Args::parse();
-    let mut client = client::Client::create(args.addr);
-    client.start().await;
-}
-
-#[cfg(server)]
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let args = Args::parse();
-    let mut server = server::Server::create(args.addr);
-    server.start().await;
+    pub addr: String,
 }

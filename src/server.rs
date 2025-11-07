@@ -1,6 +1,12 @@
-use crate::*;
+mod shared;
+mod network;
+mod utils;
+mod components;
+use crate::shared::*;
+
 use renet::{RenetServer, ServerEvent, DefaultChannel};
 use renet_netcode::NetcodeServerTransport;
+
 use std::time::Duration;
 use std::collections::HashMap;
 
@@ -8,7 +14,7 @@ fn physobj(pos: Vec3, size: Vec3) -> PhysicsObject {
     PhysicsObject::new(Cube::new(pos, size))
 }
 
-pub struct Server {
+struct Server {
     shared: Shared,
     server: RenetServer,
     transport: NetcodeServerTransport,
@@ -16,7 +22,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn create(addr: String) -> Self {
+    fn create(addr: String) -> Self {
         let (server, transport) = create_server(addr);
 
         Self {
@@ -27,7 +33,7 @@ impl Server {
         }
     }
 
-    pub async fn start(&mut self) {
+    async fn start(&mut self) {
         // self.create_map();
         self.shared.load_map(TEST_MAP.to_string()).await;
 
@@ -187,4 +193,11 @@ impl Server {
 
         self.transport.send_packets(&mut self.server);
     }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let args = Args::parse();
+    let mut server = Server::create(args.addr);
+    server.start().await;
 }

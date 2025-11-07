@@ -1,4 +1,4 @@
 #!/bin/sh
 mode="$1"
 shift
-SERVER=1 RUSTFLAGS='--cfg server' cargo $mode --target-dir target_server $@
+cargo $mode --bin server $@

@@ -1,11 +1,15 @@
-use crate::*;
+mod shared;
+mod network;
+mod utils;
+mod components;
+use crate::shared::*;
 
 use renet::{RenetClient, DefaultChannel};
 use renet_netcode::NetcodeClientTransport;
 
 use std::time::Duration;
 
-pub struct Client {
+struct Client {
     shared: Shared,
     client: RenetClient,
     transport: NetcodeClientTransport,
@@ -15,7 +19,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn create(addr: String) -> Self {
+    fn create(addr: String) -> Self {
         let (client, transport) = create_client(addr);
 
         Self {
@@ -28,7 +32,7 @@ impl Client {
         }
     }
 
-    pub async fn start(&mut self) {
+    async fn start(&mut self) {
         self.load_textures().await;
 
         let mut x = 0.0;
@@ -265,4 +269,21 @@ impl Client {
             draw_text(&text, 10.0, 55.0, 30.0, GRAY);
         }
     }
+}
+
+fn conf() -> Conf {
+    Conf {
+        window_title: String::from("JUNGLEBEAST"),
+        window_width: 1260,
+        window_height: 768,
+        fullscreen: false,
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(conf)]
+async fn main() {
+    let args = Args::parse();
+    let mut client = Client::create(args.addr);
+    client.start().await;
 }
