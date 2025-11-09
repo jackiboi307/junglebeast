@@ -38,11 +38,16 @@ impl MeshWrapper {
         use crate::miniquad::TextureWrap;
 
         let texture = if let Some(texture) = &self.texture {
-            Some(Texture2D::from_rgba8(
+            let texture = Texture2D::from_rgba8(
                 texture.width,
                 texture.height,
                 &texture.bytes
-            ))
+            );
+
+            let backend = unsafe { get_internal_gl().quad_context };
+            backend.texture_set_wrap(texture.raw_miniquad_id(), TextureWrap::Repeat, TextureWrap::Repeat);
+
+            Some(texture)
         } else {
             None
         };

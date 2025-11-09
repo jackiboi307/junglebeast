@@ -14,8 +14,6 @@ struct Client {
     client: RenetClient,
     transport: NetcodeClientTransport,
     player: Entity,
-
-    test_mesh: Option<Mesh>,
 }
 
 impl Client {
@@ -27,8 +25,6 @@ impl Client {
             client,
             transport,
             player: Entity::DANGLING,
-            
-            test_mesh: None,
         }
     }
 
@@ -40,7 +36,7 @@ impl Client {
         let bounds = 8.0;
 
         let world_up = vec3(0.0, 1.0, 0.0);
-        let mut yaw: f32 = 1.18;
+        let mut yaw: f32 = 0.0;
         let mut pitch: f32 = 0.0;
 
         let mut last_mouse_position: Vec2 = mouse_position().into();
@@ -86,7 +82,7 @@ impl Client {
             .normalize();
 
             if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(self.player) {
-                obj.cube.rot = front.cross(world_up).normalize();
+                obj.set_yaw(yaw);
             }
 
             x += if switch { 0.04 } else { -0.04 };
@@ -99,7 +95,7 @@ impl Client {
             if let Ok((obj, player)) = self.shared.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(self.player) {
                 player.moves.reset();
 
-                messages.push(ClientMessage::SetRotation(obj.cube.rot));
+                messages.push(ClientMessage::SetYaw(obj.yaw()));
 
                 if is_key_down(KeyCode::W) { player.moves.forward = true; }
                 if is_key_down(KeyCode::S) { player.moves.back = true; }
@@ -121,16 +117,16 @@ impl Client {
 
                 let (pos, up) = {
                     let obj = self.shared.ecs.get::<&PhysicsObject>(self.player).unwrap();
-                    (obj.cube.pos, obj.clone().cube.rot.cross(front).normalize())
+                    (obj.pos(), front.cross(world_up).cross(front).normalize())
                 };
 
-                if is_mouse_button_pressed(MouseButton::Left) {
-                    if let Some((_, id)) = self.shared.ray_intersection(pos, front, &[self.player]) {
-                        if self.shared.ecs.get::<&Player>(id).is_ok() {
-                            messages.push(ClientMessage::Shot(id));
-                        }
-                    }
-                }
+                // if is_mouse_button_pressed(MouseButton::Left) {
+                //     if let Some((_, id)) = self.shared.ray_intersection(pos, front, &[self.player]) {
+                //         if self.shared.ecs.get::<&Player>(id).is_ok() {
+                //             messages.push(ClientMessage::Shot(id));
+                //         }
+                //     }
+                // }
 
                 // if is_mouse_button_pressed(MouseButton::Left) {
                 //     self.ecs.spawn((physobj(
@@ -180,19 +176,28 @@ impl Client {
     async fn handle_msg(&mut self, msg: ServerMessage) {
         match msg {
             ServerMessage::Ecs(columns) => {
+                for id in columns.ids() {
+                    if !self.shared.ecs.contains(*id) {
+                        self.shared.ecs.spawn_at(*id, ());
+                    }
+                }
+
                 for (id, new_obj) in columns.PhysicsObject {
-                    if self.shared.ecs.entity(id).is_err() {
-                        self.shared.ecs.spawn_at(id, (new_obj,));
-                    } else {
-                        if let Ok(obj) = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(id) {
-                            let old_pos = obj.cube.pos;
-                            let dist = obj.cube.pos.distance(new_obj.cube.pos);
-                            // println!("{dist}");
-                            *obj = new_obj;
-                            if dist < 0.5 {
-                                obj.cube.pos = old_pos.move_towards(obj.cube.pos, 0.005);
-                            }
+                    if let Ok(obj) = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(id) {
+                        let old_pos = obj.pos();
+                        let dist = obj.pos().distance(new_obj.pos());
+                        *obj = new_obj;
+                        if dist < 0.2 {
+                            obj.set_pos(old_pos.move_towards(obj.pos(), 0.005));
                         }
+                    } else {
+                        // match &new_obj.shape {
+                        //     Shape::Obb(obb) => {
+                        //         println!("{:?}\n{:?}", obb.aabb, obb.iso);
+                        //     }
+                        // }
+
+                        self.shared.ecs.insert(id, (new_obj,)).unwrap();
                     }
                 }
 
@@ -200,8 +205,8 @@ impl Client {
                     self.shared.ecs.insert(id, (obj,)).unwrap();
                 }
 
-                for (_, wrapper) in columns.MeshWrapper {
-                    self.test_mesh = Some(wrapper.to_mesh());
+                for (id, wrapper) in columns.MeshWrapper {
+                    self.shared.ecs.insert(id, (wrapper.to_mesh(),)).unwrap();
                 }
             },
             ServerMessage::AssignId(id) => {
@@ -245,14 +250,16 @@ impl Client {
     async fn render(&self) {
         clear_background(LIGHTGRAY);
 
-        for (id, obj) in self.shared.ecs.query::<&PhysicsObject>().iter() {
+        for (id, (obj, _)) in self.shared.ecs.query::<(&PhysicsObject, &Player)>().iter() {
             if id != self.player {
-                draw_cube_wires(obj.cube.pos, obj.cube.size, BLACK);
+                draw_cube(obj.pos(), obj.bounding_box(), None, WHITE);
             }
         }
 
-        if let Some(mesh) = &self.test_mesh {
-            draw_mesh(mesh);
+        for (id, mesh) in self.shared.ecs.query::<&Mesh>().iter() {
+            if id != self.player {
+                draw_mesh(mesh);
+            }
         }
     
         set_default_camera();
@@ -265,7 +272,7 @@ impl Client {
         draw_text("JUNGLEBEAST", 10.0, 30.0, 30.0, RED);
 
         if let Some((obj, player)) = self.shared.ecs.query_one::<(&PhysicsObject, &Player)>(self.player).unwrap().get() {
-            let text = format!("fps: {}, hp: {} pos: {:.1} vel: {:.1}", get_fps(), player.hp(), obj.cube.pos, obj.vel);
+            let text = format!("fps: {}, hp: {} pos: {:.1} ground: {}", get_fps(), player.hp(), obj.pos(), obj.on_ground);
             draw_text(&text, 10.0, 55.0, 30.0, GRAY);
         }
     }

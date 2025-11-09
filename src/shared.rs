@@ -3,8 +3,10 @@ pub use hecs::{
     Entity,
 };
 pub use parry3d::{
-    shape::TriMesh,
-    math::Point,
+    bounding_volume::Aabb,
+    math::{Isometry, Point},
+    utils::obb as points_to_obb,
+    na::{Vector3, UnitQuaternion, Quaternion},
 };
 pub use serde::{Deserialize, Serialize};
 
@@ -49,10 +51,12 @@ impl Shared {
                     } else { None }
                 },
 
-                TriMesh::new(
-                    model.vertices().iter().map(|v| Point::new(v.position.x, v.position.y, v.position.z)).collect(),
-                    model.indices().unwrap().chunks_exact(3).map(|i| [i[0], i[1], i[2]]).collect(),
-                ).unwrap(),
+                PhysicsObject::new(Shape::Obb(Obb::from_points(
+                    &model.vertices().iter().map(|v| {
+                        let p = v.position;
+                        Point::new(p.x, p.y, p.z)
+                    }).collect::<Vec<Point<f32>>>()
+                ))).fixed(),
             ));
         }
     }
@@ -64,7 +68,7 @@ impl Shared {
         for i in 0..len {
             {
                 let mut obj = self.ecs.get::<&mut PhysicsObject>(ids[i]).unwrap();
-                // obj.vel.y -= 10.0 * dt;
+                obj.vel.y -= 10.0 * dt;
                 obj.on_ground = false;
             }
 
@@ -74,8 +78,9 @@ impl Shared {
                 let obj1 = obj1.unwrap();
                 let obj2 = obj2.unwrap();
 
-                let on_ground = obj1.cube.standing_on(&obj2.cube);
-                let collide = obj1.cube.intersects(&obj2.cube);
+                let collide = obj1.intersects(&obj2);
+                let (on_ground, ground) = obj1.standing_on(&obj2);
+                let on_ground = collide && on_ground;
 
                 obj1.on_ground = obj1.on_ground || on_ground;
 
@@ -85,14 +90,17 @@ impl Shared {
                     obj1.vel.z /= friction;
                     obj1.vel.y = 0.0;
 
+                    let pos = obj1.pos();
+                    obj1.set_pos(vec3(pos.x, ground - 0.05, pos.z));
+
                 } else if collide {
-                    obj1.vel = (obj1.cube.pos - obj2.cube.pos).normalize();
+                    obj1.vel = (obj1.pos() - obj2.pos()).normalize();
                 }
             }
 
             let obj = {
                 if let Ok((obj, player)) = self.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(ids[i]) {
-                    Self::handle_movement(&mut player.moves, obj);
+                    Self::handle_movement(dt, &mut player.moves, obj);
                     obj
                 } else {
                     &mut self.ecs.get::<&mut PhysicsObject>(ids[i]).unwrap()
@@ -101,15 +109,15 @@ impl Shared {
 
             let vel = obj.vel;
             if !obj.fixed {
-                obj.cube.pos += vel * dt;
+                obj.move_pos(vel * dt);
             }
         }
     }
 
-    fn handle_movement(state: &mut MoveState, obj: &mut PhysicsObject) {
+    fn handle_movement(dt: f32, state: &mut MoveState, obj: &mut PhysicsObject) {
         let move_speed = 0.1;
-        let step_ws = vec3(obj.cube.rot.z, obj.cube.rot.y, -obj.cube.rot.x) * move_speed;
-        let step_ad = obj.cube.rot * move_speed;
+        let step_ws = obj.yaw_vec() * move_speed;
+        let step_ad = vec3(-step_ws.z, 0.0, step_ws.x);
 
         if state.forward    { obj.vel += step_ws; }
         if state.back       { obj.vel -= step_ws; }
@@ -119,55 +127,6 @@ impl Shared {
         if state.get_jump() && obj.on_ground {
             obj.vel.y += 5.0;
         }
-    }
-
-    pub fn ray_intersection(&self, origin: Vec3, dir: Vec3, ignore_ids: &[Entity]) -> Option<(Vec3, Entity)> {
-        // mainly ai generated!
-
-        let mut result: Option<(Vec3, Entity)> = None;
-
-        for (id, (obj,)) in self.ecs.query::<(&PhysicsObject,)>().iter() {
-            if ignore_ids.contains(&id) {
-                continue
-            }
-
-            let cube = &obj.cube;
-            let half = cube.size * 0.5;
-            let min = cube.pos - half;
-            let max = cube.pos + half;
-
-            let mut tmin = f32::NEG_INFINITY;
-            let mut tmax = f32::INFINITY;
-
-            let mut check_axis = |o: f32, d: f32, a_min: f32, a_max: f32| -> bool {
-                if d.abs() < 1e-8 {
-                    return !(o < a_min || o > a_max);
-                }
-                let inv = 1.0 / d;
-                let mut t0 = (a_min - o) * inv;
-                let mut t1 = (a_max - o) * inv;
-                if t0 > t1 { std::mem::swap(&mut t0, &mut t1); }
-                if t0 > tmin { tmin = t0 }
-                if t1 < tmax { tmax = t1 }
-                tmin <= tmax
-            };
-
-            if !check_axis(origin.x, dir.x, min.x, max.x) ||
-               !check_axis(origin.y, dir.y, min.y, max.y) ||
-               !check_axis(origin.z, dir.z, min.z, max.z) {
-                continue
-            }
-
-            if tmax < 0.0 { continue }
-            let t_enter = tmin.max(0.0);
-            
-            if result.is_none() || t_enter < origin.distance(result.unwrap().0) {
-                let res = origin + dir * t_enter;
-                result = Some((res, id));
-            }
-        }
-
-        return result;
     }
 }
 

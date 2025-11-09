@@ -11,7 +11,7 @@ use std::time::Duration;
 use std::collections::HashMap;
 
 fn physobj(pos: Vec3, size: Vec3) -> PhysicsObject {
-    PhysicsObject::new(Cube::new(pos, size))
+    PhysicsObject::new(Shape::Obb(Obb::from_pos_size(pos, size)))
 }
 
 struct Server {
@@ -101,9 +101,9 @@ impl Server {
                     player.moves.jump = jumping || player.moves.jump;
                 }
             },
-            ClientMessage::SetRotation(rot) => {
+            ClientMessage::SetYaw(yaw) => {
                 if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(id) {
-                    obj.cube.rot = rot;
+                    obj.set_yaw(yaw);
                 }
             }
             ClientMessage::Shot(shot_id) => {
@@ -112,8 +112,8 @@ impl Server {
                     if let Ok((obj, player)) = self.shared.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(shot_id) {
                         player.hurt(20);
                         if player.dead() {
-                            let old_pos = obj.cube.pos;
-                            obj.cube.pos = vec3(0.0, 60.0, 0.0);
+                            let old_pos = obj.pos();
+                            obj.set_pos(vec3(0.0, 60.0, 0.0));
                             player.reset_hp();
                             Some(old_pos)
                         } else { None }
@@ -140,7 +140,7 @@ impl Server {
                                 let id = self.shared.ecs.spawn((
                                     Player::new(),
                                     physobj(
-                                        vec3(0.0, 3.0, 0.0),
+                                        vec3(0.0, 5.0, 0.0),
                                         vec3(1.0, 2.0, 1.0)
                                     ),
                                 ));
