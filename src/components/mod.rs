@@ -6,3 +6,9 @@ pub use player::*;
 
 mod model;
 pub use model::*;
+
+mod spawn;
+pub use spawn::*;
+
+mod properties;
+pub use properties::*;

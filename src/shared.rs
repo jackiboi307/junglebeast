@@ -6,7 +6,7 @@ pub use parry3d::{
     bounding_volume::Aabb,
     math::{Isometry, Point},
     utils::obb as points_to_obb,
-    na::{Vector3, UnitQuaternion, Quaternion},
+    na::{Vector3, UnitQuaternion, Quaternion, Matrix4, Vector4},
 };
 pub use serde::{Deserialize, Serialize};
 
@@ -14,8 +14,34 @@ pub use crate::network::*;
 pub use crate::utils::*;
 pub use crate::components::*;
 
+use gltf::{
+    image::Source,
+    scene::Transform,
+};
+
 pub const PHYSICS_STEP: f32 = 1.0 / 60.0;
 pub const TEST_MAP: &'static str = "maps/test.glb";
+
+trait AssumeOne: Iterator + Sized {
+    fn assume_one(self) -> Self::Item;
+}
+
+impl<I> AssumeOne for I
+where
+    I: Iterator,
+{
+    fn assume_one(mut self) -> Self::Item {
+        match self.next() {
+            None => panic!("assume_one failed: iterator is empty"),
+            Some(first) => {
+                if self.next().is_some() {
+                    eprintln!("assume_one warning: iterator had more than one item (ignoring)");
+                }
+                first
+            }
+        }
+    }
+}
 
 pub struct Shared {
     pub ecs: hecs::World,
@@ -29,35 +55,65 @@ impl Shared {
     }
 
     pub async fn load_map(&mut self, path: String) {
-        let scenes = easy_gltf::load(path).unwrap();
-        let scene = scenes.get(0).unwrap();
+        let (document, buffers, images) = gltf::import(path).unwrap();
+        let scene = document.scenes().assume_one();
 
-        for model in &scene.models {
-            self.ecs.spawn((
-                MeshWrapper {
-                    vertices: model.vertices().iter().map(|v| VertexWrapper {
-                        position: vec3(v.position.x, v.position.y, v.position.z),
-                        color: [255, 255, 255, 255],
-                        uv: vec2(v.tex_coords.x, v.tex_coords.y),
-                        normal: vec4(v.normal.x, v.normal.y, v.normal.z, 1.0),
-                    }).collect(),
-                    indices: model.indices().unwrap().iter().map(|i| *i as u16).collect(),
-                    texture: if let Some(texture) = model.material().pbr.base_color_texture.clone() {
-                        Some(ImageWrapper {
-                            width: texture.width().try_into().unwrap(),
-                            height: texture.height().try_into().unwrap(),
-                            bytes: texture.as_raw().to_vec(),
-                        })
-                    } else { None }
-                },
+        for node in scene.nodes() {
+            if let Some(mesh) = node.mesh() {
+                let primitive = mesh.primitives().assume_one();
+                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+                let indices: Vec<_> = reader
+                    .read_indices()
+                    .map(|indices| indices.into_u32().collect()).unwrap();
+                let mut vertices: Vec<_> = reader
+                    .read_positions()
+                    .unwrap()
+                    .map(|pos| {
+                        let tr = node.transform().matrix();
+                        let tr = Matrix4::from(tr);
+                        let p = tr * Vector4::new(pos[0], pos[1], pos[2], 1.0);
+                        Vertex::new(p.x / p.w, p.y / p.w, p.z / p.w, 0.0, 0.0, WHITE)
+                    })
+                    .collect();
+                for (i, uv) in reader.read_tex_coords(0).unwrap().into_f32().enumerate() {
+                    vertices[i].uv = uv.into();
+                }
+                let mut texture = images[
+                        primitive
+                        .material()
+                        .pbr_metallic_roughness()
+                        .base_color_texture().unwrap()
+                        .texture().source().index()
+                    ].clone();
+                texture.pixels = texture.pixels
+                    .chunks_exact(3)
+                    .map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
+                    .flatten().collect();
 
-                PhysicsObject::new(Shape::Obb(Obb::from_points(
-                    &model.vertices().iter().map(|v| {
-                        let p = v.position;
-                        Point::new(p.x, p.y, p.z)
-                    }).collect::<Vec<Point<f32>>>()
-                ))).fixed(),
-            ));
+                self.ecs.spawn((
+                    MeshWrapper {
+                        vertices: vertices.iter().map(|v| VertexWrapper {
+                            position: vec3(v.position.x, v.position.y, v.position.z),
+                            color: [255, 255, 255, 255],
+                            uv: vec2(v.uv.x, v.uv.y),
+                            normal: vec4(v.normal.x, v.normal.y, v.normal.z, 1.0),
+                        }).collect(),
+                        indices: indices.iter().map(|i| *i as u16).collect(),
+                        texture: Some(ImageWrapper {
+                            width: texture.width.try_into().unwrap(),
+                            height: texture.height.try_into().unwrap(),
+                            bytes: texture.pixels,
+                        }),
+                    },
+
+                    PhysicsObject::new(Shape::Obb(Obb::from_points(
+                        &vertices.iter().map(|v| {
+                            let p = v.position;
+                            Point::new(p.x, p.y, p.z)
+                        }).collect::<Vec<Point<f32>>>()
+                    ))).fixed(),
+                ));
+            }
         }
     }
 

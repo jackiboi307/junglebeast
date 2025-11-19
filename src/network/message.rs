@@ -24,14 +24,24 @@ pub struct Columns {
     pub PhysicsObject: Column<PhysicsObject>,
     pub MeshWrapper:   Column<MeshWrapper>,
     pub Player:        Column<Player>,
+    pub Spawn:         Column<Spawn>,
+    pub Properties:    Column<Properties>,
+}
+
+macro_rules! push {
+    ($self:ident, $ids:ident, $t:tt) => {{
+        for (id, _) in &$self.$t { if !$ids.contains(&id) { $ids.push(id) } };
+    }}
 }
 
 impl Columns {
     pub fn ids(&self) -> Vec<&Entity> {
         let mut ids = Vec::new();
-        for (id, _) in &self.PhysicsObject { if !ids.contains(&id) { ids.push(id) } };
-        for (id, _) in &self.MeshWrapper   { if !ids.contains(&id) { ids.push(id) } };
-        for (id, _) in &self.Player        { if !ids.contains(&id) { ids.push(id) } };
+        push!(self, ids, PhysicsObject);
+        push!(self, ids, MeshWrapper);
+        push!(self, ids, Player);
+        push!(self, ids, Spawn);
+        push!(self, ids, Properties);
         ids
     }
 }
