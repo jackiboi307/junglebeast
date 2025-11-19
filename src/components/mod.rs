@@ -7,8 +7,8 @@ pub use player::*;
 mod model;
 pub use model::*;
 
-mod spawn;
-pub use spawn::*;
+mod point;
+pub use point::*;
 
 mod properties;
 pub use properties::*;

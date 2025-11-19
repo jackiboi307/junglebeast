@@ -24,7 +24,7 @@ pub struct Columns {
     pub PhysicsObject: Column<PhysicsObject>,
     pub MeshWrapper:   Column<MeshWrapper>,
     pub Player:        Column<Player>,
-    pub Spawn:         Column<Spawn>,
+    pub PointObject:   Column<PointObject>,
     pub Properties:    Column<Properties>,
 }
 
@@ -40,7 +40,7 @@ impl Columns {
         push!(self, ids, PhysicsObject);
         push!(self, ids, MeshWrapper);
         push!(self, ids, Player);
-        push!(self, ids, Spawn);
+        push!(self, ids, PointObject);
         push!(self, ids, Properties);
         ids
     }

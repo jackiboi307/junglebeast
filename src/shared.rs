@@ -1,6 +1,8 @@
 pub use macroquad::prelude::*;
 pub use hecs::{
     Entity,
+    EntityBuilder,
+    DynamicBundle,
 };
 pub use parry3d::{
     bounding_volume::Aabb,
@@ -17,6 +19,10 @@ pub use crate::components::*;
 use gltf::{
     image::Source,
     scene::Transform,
+};
+use serde_json::{
+    from_value,
+    from_str,
 };
 
 pub const PHYSICS_STEP: f32 = 1.0 / 60.0;
@@ -59,62 +65,83 @@ impl Shared {
         let scene = document.scenes().assume_one();
 
         for node in scene.nodes() {
+            let mut builder = EntityBuilder::new();
+
             if let Some(mesh) = node.mesh() {
-                let primitive = mesh.primitives().assume_one();
-                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-                let indices: Vec<_> = reader
-                    .read_indices()
-                    .map(|indices| indices.into_u32().collect()).unwrap();
-                let mut vertices: Vec<_> = reader
-                    .read_positions()
-                    .unwrap()
-                    .map(|pos| {
-                        let tr = node.transform().matrix();
-                        let tr = Matrix4::from(tr);
-                        let p = tr * Vector4::new(pos[0], pos[1], pos[2], 1.0);
-                        Vertex::new(p.x / p.w, p.y / p.w, p.z / p.w, 0.0, 0.0, WHITE)
-                    })
-                    .collect();
-                for (i, uv) in reader.read_tex_coords(0).unwrap().into_f32().enumerate() {
-                    vertices[i].uv = uv.into();
-                }
-                let mut texture = images[
-                        primitive
-                        .material()
-                        .pbr_metallic_roughness()
-                        .base_color_texture().unwrap()
-                        .texture().source().index()
-                    ].clone();
-                texture.pixels = texture.pixels
-                    .chunks_exact(3)
-                    .map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
-                    .flatten().collect();
-
-                self.ecs.spawn((
-                    MeshWrapper {
-                        vertices: vertices.iter().map(|v| VertexWrapper {
-                            position: vec3(v.position.x, v.position.y, v.position.z),
-                            color: [255, 255, 255, 255],
-                            uv: vec2(v.uv.x, v.uv.y),
-                            normal: vec4(v.normal.x, v.normal.y, v.normal.z, 1.0),
-                        }).collect(),
-                        indices: indices.iter().map(|i| *i as u16).collect(),
-                        texture: Some(ImageWrapper {
-                            width: texture.width.try_into().unwrap(),
-                            height: texture.height.try_into().unwrap(),
-                            bytes: texture.pixels,
-                        }),
-                    },
-
-                    PhysicsObject::new(Shape::Obb(Obb::from_points(
-                        &vertices.iter().map(|v| {
-                            let p = v.position;
-                            Point::new(p.x, p.y, p.z)
-                        }).collect::<Vec<Point<f32>>>()
-                    ))).fixed(),
-                ));
+                builder.add_bundle(self.handle_mesh(&buffers, &images, &node, mesh));
+            } else {
+                let (pos, _, _) = node.transform().decomposed();
+                builder.add(PointObject(pos.into()));
             }
+
+            if let Some(extras) = node.extras() {
+                let props: Properties = from_value(from_str(extras.get()).unwrap()).unwrap();
+                builder.add(props);
+            }
+
+            self.ecs.spawn(builder.build());
         }
+    }
+
+    fn handle_mesh(&mut self,
+            buffers: &Vec<gltf::buffer::Data>,
+            images: &Vec<gltf::image::Data>,
+            node: &gltf::Node,
+            mesh: gltf::Mesh) -> impl DynamicBundle {
+
+        let primitive = mesh.primitives().assume_one();
+        let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+        let indices: Vec<_> = reader
+            .read_indices()
+            .map(|indices| indices.into_u32().collect()).unwrap();
+        let mut vertices: Vec<_> = reader
+            .read_positions()
+            .unwrap()
+            .map(|pos| {
+                let tr = node.transform().matrix();
+                let tr = Matrix4::from(tr);
+                let p = tr * Vector4::new(pos[0], pos[1], pos[2], 1.0);
+                Vertex::new(p.x / p.w, p.y / p.w, p.z / p.w, 0.0, 0.0, WHITE)
+            })
+            .collect();
+        for (i, uv) in reader.read_tex_coords(0).unwrap().into_f32().enumerate() {
+            vertices[i].uv = uv.into();
+        }
+        let mut texture = images[
+                primitive
+                .material()
+                .pbr_metallic_roughness()
+                .base_color_texture().unwrap()
+                .texture().source().index()
+            ].clone();
+        texture.pixels = texture.pixels
+            .chunks_exact(3)
+            .map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
+            .flatten().collect();
+
+        (
+            MeshWrapper {
+                vertices: vertices.iter().map(|v| VertexWrapper {
+                    position: vec3(v.position.x, v.position.y, v.position.z),
+                    color: [255, 255, 255, 255],
+                    uv: vec2(v.uv.x, v.uv.y),
+                    normal: vec4(v.normal.x, v.normal.y, v.normal.z, 1.0),
+                }).collect(),
+                indices: indices.iter().map(|i| *i as u16).collect(),
+                texture: Some(ImageWrapper {
+                    width: texture.width.try_into().unwrap(),
+                    height: texture.height.try_into().unwrap(),
+                    bytes: texture.pixels,
+                }),
+            },
+
+            PhysicsObject::new(Shape::Obb(Obb::from_points(
+                &vertices.iter().map(|v| {
+                    let p = v.position;
+                    Point::new(p.x, p.y, p.z)
+                }).collect::<Vec<Point<f32>>>()
+            ))).fixed(),
+        )
     }
 
     pub async fn handle_physics(&mut self, dt: f32) {
