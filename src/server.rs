@@ -34,7 +34,6 @@ impl Server {
     }
 
     async fn start(&mut self) {
-        // self.create_map();
         self.shared.load_map(TEST_MAP.to_string()).await;
 
         let mut update = Interval::new(Duration::from_millis(1000 / 30));
@@ -57,17 +56,19 @@ impl Server {
         }
     }
 
-    // fn create_map(&mut self) {
-    //     // self.shared.ecs.spawn((physobj(
-    //     //     vec3(0.0, -1.0, 0.0),
-    //     //     vec3(60.0, 2.0, 60.0)).fixed(),));
-    //     self.shared.ecs.spawn((physobj(
-    //         vec3(0.0, 0.5, 5.0),
-    //         vec3(5.0, 1.0, 1.0)).fixed(),));
-    //     self.shared.ecs.spawn((physobj(
-    //         vec3(0.0, 2.0, -5.0),
-    //         vec3(5.0, 4.0, 1.0)).fixed(),));
-    // }
+    async fn get_random_spawn(&self) -> Vec3 {
+        let mut spawn_points = Vec::new();
+
+        for (id, (pos, props)) in self.shared.ecs.query::<(&PointObject, &Properties)>().iter() {
+            if let Some(spawn) = props.spawn {
+                if spawn {
+                    spawn_points.push(pos.0);
+                }
+            }
+        }
+
+        *spawn_points.choose().unwrap_or_else(|| &Vec3::ZERO)
+    }
 
     fn spawn_gibs(&mut self, target: Vec3) {
         for x in 0..2 {
@@ -140,7 +141,7 @@ impl Server {
                                 let id = self.shared.ecs.spawn((
                                     Player::new(),
                                     physobj(
-                                        vec3(0.0, 3.0, 10.0),
+                                        self.get_random_spawn().await,
                                         vec3(1.0, 2.0, 1.0)
                                     ),
                                 ));

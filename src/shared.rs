@@ -1,4 +1,7 @@
-pub use macroquad::prelude::*;
+pub use macroquad::{
+    prelude::*,
+    rand::*,
+};
 pub use hecs::{
     Entity,
     EntityBuilder,
@@ -71,10 +74,12 @@ impl Shared {
                 builder.add_bundle(self.handle_mesh(&buffers, &images, &node, mesh));
             } else {
                 let (pos, _, _) = node.transform().decomposed();
+                // println!("{:?}", pos);
                 builder.add(PointObject(pos.into()));
             }
 
             if let Some(extras) = node.extras() {
+                // println!("{:?}", extras);
                 let props: Properties = from_value(from_str(extras.get()).unwrap()).unwrap();
                 builder.add(props);
             }
