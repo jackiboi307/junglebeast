@@ -7,6 +7,8 @@ pub type ClientMessages = Vec<ClientMessage>;
 pub enum ServerMessage {
     AssignId(Entity),
     Ecs(Columns),
+    PhysicsState(RigidBodySet, ColliderSet),
+    PhysicsDiff(PhysicsDiff),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -21,11 +23,12 @@ type Column<T> = Vec<(Entity, T)>;
 #[allow(non_snake_case)]
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct Columns {
-    pub PhysicsObject: Column<PhysicsObject>,
-    pub MeshWrapper:   Column<MeshWrapper>,
-    pub Player:        Column<Player>,
-    pub PointObject:   Column<PointObject>,
-    pub Properties:    Column<Properties>,
+    pub RigidBodyHandle: Column<RigidBodyHandle>,
+    pub ColliderHandle:  Column<ColliderHandle>,
+    pub MeshWrapper:     Column<MeshWrapper>,
+    pub Player:          Column<Player>,
+    pub PointObject:     Column<PointObject>,
+    pub Properties:      Column<Properties>,
 }
 
 macro_rules! push {
@@ -37,7 +40,8 @@ macro_rules! push {
 impl Columns {
     pub fn ids(&self) -> Vec<&Entity> {
         let mut ids = Vec::new();
-        push!(self, ids, PhysicsObject);
+        push!(self, ids, RigidBodyHandle);
+        push!(self, ids, ColliderHandle);
         push!(self, ids, MeshWrapper);
         push!(self, ids, Player);
         push!(self, ids, PointObject);

@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 pub use macroquad::{
     prelude::*,
     rand::*,
@@ -7,17 +9,22 @@ pub use hecs::{
     EntityBuilder,
     DynamicBundle,
 };
-pub use parry3d::{
-    bounding_volume::Aabb,
-    math::{Isometry, Point},
-    utils::obb as points_to_obb,
-    na::{Vector3, UnitQuaternion, Quaternion, Matrix4, Vector4},
+pub use rapier3d::{
+    prelude::*,
+    parry::{
+        bounding_volume::Aabb,
+        math::{Isometry, Point},
+        utils::obb as points_to_obb,
+        na::{Vector3, UnitQuaternion, Quaternion, Matrix4, Vector4},
+        query::{Ray, RayCast},
+    },
 };
 pub use serde::{Deserialize, Serialize};
 
 pub use crate::network::*;
 pub use crate::utils::*;
 pub use crate::components::*;
+pub use crate::physics::*;
 
 use gltf::{
     image::Source,
@@ -30,6 +37,19 @@ use serde_json::{
 
 pub const PHYSICS_STEP: f32 = 1.0 / 60.0;
 pub const TEST_MAP: &'static str = "maps/test.glb";
+
+// convert vectors between Vec3 (glam, macroquad) and Vector3 (nalgebra, rapier)
+// TODO create custom conversion trait such as .conv()?
+
+pub fn conv_vec_1(vec: Vec3) -> Vector3<f32> {
+    Vector3::new(vec.x, vec.y, vec.z)
+}
+
+pub fn conv_vec_2(vector: Vector3<f32>) -> Vec3 {
+    vec3(vector.x, vector.y, vector.z)
+}
+
+// stupid trait used once
 
 trait AssumeOne: Iterator + Sized {
     fn assume_one(self) -> Self::Item;
@@ -52,14 +72,18 @@ where
     }
 }
 
+// the absolute core
+
 pub struct Shared {
     pub ecs: hecs::World,
+    pub physics: Physics,
 }
 
 impl Shared {
     pub fn new() -> Self {
         Self {
             ecs: hecs::World::new(),
+            physics: Physics::new(),
         }
     }
 
@@ -71,15 +95,13 @@ impl Shared {
             let mut builder = EntityBuilder::new();
 
             if let Some(mesh) = node.mesh() {
-                builder.add_bundle(self.handle_mesh(&buffers, &images, &node, mesh));
+                builder.add_bundle(self.handle_mesh(&buffers, &images, &node, &mesh));
             } else {
                 let (pos, _, _) = node.transform().decomposed();
-                // println!("{:?}", pos);
                 builder.add(PointObject(pos.into()));
             }
 
             if let Some(extras) = node.extras() {
-                // println!("{:?}", extras);
                 let props: Properties = from_value(from_str(extras.get()).unwrap()).unwrap();
                 builder.add(props);
             }
@@ -92,7 +114,7 @@ impl Shared {
             buffers: &Vec<gltf::buffer::Data>,
             images: &Vec<gltf::image::Data>,
             node: &gltf::Node,
-            mesh: gltf::Mesh) -> impl DynamicBundle {
+            mesh: &gltf::Mesh) -> impl DynamicBundle {
 
         let primitive = mesh.primitives().assume_one();
         let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
@@ -140,82 +162,88 @@ impl Shared {
                 }),
             },
 
-            PhysicsObject::new(Shape::Obb(Obb::from_points(
-                &vertices.iter().map(|v| {
-                    let p = v.position;
-                    Point::new(p.x, p.y, p.z)
-                }).collect::<Vec<Point<f32>>>()
-            ))).fixed(),
+            // PhysicsObject::new(Shape::Obb(Obb::from_points(
+            //     &vertices.iter().map(|v| {
+            //         let p = v.position;
+            //         Point::new(p.x, p.y, p.z)
+            //     }).collect::<Vec<Point<f32>>>()
+            // ))).fixed(),
         )
     }
 
-    pub async fn handle_physics(&mut self, dt: f32) {
-        let ids: Vec<Entity> = self.ecs.query::<(&PhysicsObject,)>().iter().map(|(id, _)| id).collect();
-        let len = ids.len();
-
-        for i in 0..len {
-            {
-                let mut obj = self.ecs.get::<&mut PhysicsObject>(ids[i]).unwrap();
-                obj.vel.y -= 10.0 * dt;
-                obj.on_ground = false;
-            }
-
-            for j in 0..len {
-                if i == j { continue }
-                let [obj1, obj2] = self.ecs.query_many_mut::<&mut PhysicsObject, 2>([ids[i], ids[j]]);
-                let obj1 = obj1.unwrap();
-                let obj2 = obj2.unwrap();
-
-                let collide = obj1.intersects(&obj2);
-                let (on_ground, ground) = obj1.standing_on(&obj2);
-                let on_ground = collide && on_ground;
-
-                obj1.on_ground = obj1.on_ground || on_ground;
-
-                if on_ground {
-                    let friction = obj2.friction;
-                    obj1.vel.x /= friction;
-                    obj1.vel.z /= friction;
-                    obj1.vel.y = 0.0;
-
-                    let pos = obj1.pos();
-                    obj1.set_pos(vec3(pos.x, ground - 0.05, pos.z));
-
-                } else if collide {
-                    obj1.vel = (obj1.pos() - obj2.pos()).normalize();
-                }
-            }
-
-            let obj = {
-                if let Ok((obj, player)) = self.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(ids[i]) {
-                    Self::handle_movement(dt, &mut player.moves, obj);
-                    obj
-                } else {
-                    &mut self.ecs.get::<&mut PhysicsObject>(ids[i]).unwrap()
-                }
-            };
-
-            let vel = obj.vel;
-            if !obj.fixed {
-                obj.move_pos(vel * dt);
-            }
-        }
+    pub async fn handle_physics(&mut self, _dt: f32) {
+        self.physics.step();
     }
 
-    fn handle_movement(dt: f32, state: &mut MoveState, obj: &mut PhysicsObject) {
-        let move_speed = 0.1;
-        let step_ws = obj.yaw_vec() * move_speed;
-        let step_ad = vec3(-step_ws.z, 0.0, step_ws.x);
+    // pub async fn _handle_physics(&mut self, dt: f32) {
+    //     let ids: Vec<Entity> = self.ecs.query::<(&PhysicsObject,)>().iter().map(|(id, _)| id).collect();
+    //     let len = ids.len();
 
-        if state.forward    { obj.vel += step_ws; }
-        if state.back       { obj.vel -= step_ws; }
-        if state.left       { obj.vel -= step_ad; }
-        if state.right      { obj.vel += step_ad; }
+    //     for i in 0..len {
+    //         if let Ok(obj) = self.ecs.query_one_mut::<&mut PhysicsObject>(ids[i]) {
+    //             if !obj.fixed {
+    //                 obj.vel.y -= 10.0 * dt;
+    //             }
+    //         }
 
-        if state.get_jump() && obj.on_ground {
-            obj.vel.y += 5.0;
-        }
-    }
+    //         if let Ok((obj, player)) = self.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(ids[i]) {
+    //             Self::handle_movement(dt, &mut player.moves, obj);
+    //         }
+
+    //         if let Ok(obj) = self.ecs.query_one_mut::<&mut PhysicsObject>(ids[i]) {
+    //             if obj.fixed { continue }
+
+    //             let pos = obj.pos();
+    //             obj.move_pos(obj.vel * dt);
+    //             let direction = (obj.pos() - pos).normalize();
+    //             let distance = obj.pos().distance(pos);
+
+    //             // let origin = conv_vec_1(obj.pos()).into();
+    //             let mut origin = obj.pos();
+    //             origin.y -= obj.half_extents().y;
+    //             let origin = conv_vec_1(origin);
+    //             let ray = Ray::new(origin.into(), conv_vec_1(direction).into());
+
+    //             for j in 0..len {
+    //                 if i == j { continue }
+
+    //                 let [obj, obj2] = self.ecs.query_many_mut::<&mut PhysicsObject, 2>([ids[i], ids[j]]);
+    //                 let obj  = obj.unwrap();
+    //                 let obj2 = obj2.unwrap();
+
+    //                 let res = obj2.cast_ray(&ray, distance);
+
+    //                 if let Some(distance) = res {
+    //                     let vel = -direction * distance;
+    //                     obj.vel = vel;
+    //                     println!("{}", vel);
+    //                 }
+    //             }
+    //         }
+
+    //         // for j in 0..len {
+    //         //     if i == j { continue }
+    //         //     let [obj1, obj2] = self.ecs.query_many_mut::<&mut PhysicsObject, 2>([ids[i], ids[j]]);
+    //         //     let obj1 = obj1.unwrap();
+    //         //     let obj2 = obj2.unwrap();
+    //         // }
+    //     }
+    // }
+
+    // fn handle_movement(_dt: f32, state: &mut MoveState, obj: &mut PhysicsObject) {
+    //     let move_speed = 0.1;
+    //     let step_ws = obj.yaw_vec() * move_speed;
+    //     let step_ad = vec3(-step_ws.z, 0.0, step_ws.x);
+
+    //     if state.forward    { obj.vel += step_ws; }
+    //     if state.back       { obj.vel -= step_ws; }
+    //     if state.left       { obj.vel -= step_ad; }
+    //     if state.right      { obj.vel += step_ad; }
+
+    //     if state.get_jump() && obj.on_ground {
+    //         obj.vel.y += 5.0;
+    //     }
+    // }
 }
 
 pub use clap::{Parser, arg};

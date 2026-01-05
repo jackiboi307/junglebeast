@@ -1,4 +1,5 @@
 mod shared;
+mod physics;
 mod network;
 mod utils;
 mod components;
@@ -81,9 +82,10 @@ impl Client {
             )
             .normalize();
 
-            if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(self.player) {
-                obj.set_yaw(yaw);
-            }
+            // TODO
+            // if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(self.player) {
+            //     obj.set_yaw(yaw);
+            // }
 
             x += if switch { 0.04 } else { -0.04 };
             if x >= bounds || x <= -bounds {
@@ -92,10 +94,11 @@ impl Client {
 
             let mut messages = ClientMessages::new();
 
-            if let Ok((obj, player)) = self.shared.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(self.player) {
+            if let Ok(player) = self.shared.ecs.query_one_mut::<&mut Player>(self.player) {
                 player.moves.reset();
 
-                messages.push(ClientMessage::SetYaw(obj.yaw()));
+                // TODO
+                // messages.push(ClientMessage::SetYaw(obj.yaw()));
 
                 if is_key_down(KeyCode::W) { player.moves.forward = true; }
                 if is_key_down(KeyCode::S) { player.moves.back = true; }
@@ -116,8 +119,9 @@ impl Client {
                 }
 
                 let (pos, up) = {
-                    let obj = self.shared.ecs.get::<&PhysicsObject>(self.player).unwrap();
-                    (obj.pos(), front.cross(world_up).cross(front).normalize())
+                    let handle = self.shared.ecs.get::<&RigidBodyHandle>(self.player).unwrap();
+                    let rig = self.shared.physics.get_rig(*handle);
+                    (conv_vec_2(*rig.translation()), front.cross(world_up).cross(front).normalize())
                 };
 
                 // if is_mouse_button_pressed(MouseButton::Left) {
@@ -182,35 +186,55 @@ impl Client {
                     }
                 }
 
-                for (id, new_obj) in columns.PhysicsObject {
-                    if let Ok(obj) = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(id) {
-                        let old_pos = obj.pos();
-                        let dist = obj.pos().distance(new_obj.pos());
-                        *obj = new_obj;
-                        if dist < 0.2 {
-                            obj.set_pos(old_pos.move_towards(obj.pos(), 0.005));
-                        }
-                    } else {
-                        // match &new_obj.shape {
-                        //     Shape::Obb(obb) => {
-                        //         println!("{:?}\n{:?}", obb.aabb, obb.iso);
-                        //     }
-                        // }
+                // for (id, new_obj) in columns.PhysicsObject {
+                //     if let Ok(obj) = self.shared.ecs.query_one_mut::<&mut PhysicsObject>(id) {
+                //         let old_pos = obj.pos();
+                //         let dist = obj.pos().distance(new_obj.pos());
+                //         *obj = new_obj;
+                //         if dist < 0.2 {
+                //             obj.set_pos(old_pos.move_towards(obj.pos(), 0.005));
+                //         }
+                //     } else {
+                //         // match &new_obj.shape {
+                //         //     Shape::Obb(obb) => {
+                //         //         println!("{:?}\n{:?}", obb.aabb, obb.iso);
+                //         //     }
+                //         // }
 
-                        self.shared.ecs.insert(id, (new_obj,)).unwrap();
-                    }
+                //         self.shared.ecs.insert(id, (new_obj,)).unwrap();
+                //     }
+                // }
+
+                for (id, handle) in columns.RigidBodyHandle {
+                    self.shared.ecs.insert(id, (handle,)).unwrap();
                 }
 
-                for (id, obj) in columns.Player {
-                    self.shared.ecs.insert(id, (obj,)).unwrap();
+                for (id, handle) in columns.ColliderHandle {
+                    self.shared.ecs.insert(id, (handle,)).unwrap();
                 }
 
                 for (id, wrapper) in columns.MeshWrapper {
                     self.shared.ecs.insert(id, (wrapper.to_mesh(),)).unwrap();
                 }
-            },
+
+                for (id, obj) in columns.Player {
+                    self.shared.ecs.insert(id, (obj,)).unwrap();
+                }
+            }
             ServerMessage::AssignId(id) => {
                 self.player = id;
+            }
+            ServerMessage::PhysicsState(rigid_body_set, collider_set) => {
+                self.shared.physics.state.rigid_body_set = rigid_body_set;
+                self.shared.physics.state.collider_set = collider_set;
+            }
+            ServerMessage::PhysicsDiff((rigid_body_updates, collider_updates)) => {
+                for (handle, rig) in rigid_body_updates {
+                    self.shared.physics.get_rig_mut(handle).copy_from(&rig);
+                }
+                for (handle, col) in collider_updates {
+                    self.shared.physics.get_col_mut(handle).copy_from(&col);
+                }
             }
         }
     }
@@ -250,11 +274,11 @@ impl Client {
     async fn render(&self) {
         clear_background(LIGHTGRAY);
 
-        for (id, (obj, _)) in self.shared.ecs.query::<(&PhysicsObject, &Player)>().iter() {
-            if id != self.player {
-                draw_cube(obj.pos(), obj.bounding_box(), None, WHITE);
-            }
-        }
+        // for (id, (obj, _)) in self.shared.ecs.query::<(&PhysicsObject, &Player)>().iter() {
+        //     if id != self.player {
+        //         draw_cube(obj.pos(), obj.bounding_box(), None, WHITE);
+        //     }
+        // }
 
         for (id, mesh) in self.shared.ecs.query::<&Mesh>().iter() {
             if id != self.player {
@@ -271,8 +295,9 @@ impl Client {
 
         draw_text("JUNGLEBEAST", 10.0, 30.0, 30.0, RED);
 
-        if let Some((obj, player)) = self.shared.ecs.query_one::<(&PhysicsObject, &Player)>(self.player).unwrap().get() {
-            let text = format!("fps: {}, hp: {} pos: {:.1} ground: {}", get_fps(), player.hp(), obj.pos(), obj.on_ground);
+        if let Some((handle, player)) = self.shared.ecs.query_one::<(&RigidBodyHandle, &Player)>(self.player).unwrap().get() {
+            let pos = conv_vec_2(*self.shared.physics.get_rig(*handle).translation());
+            let text = format!("fps: {}, hp: {} pos: {:.1}", get_fps(), player.hp(), pos);
             draw_text(&text, 10.0, 55.0, 30.0, GRAY);
         }
     }

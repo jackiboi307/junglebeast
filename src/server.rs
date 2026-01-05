@@ -1,4 +1,5 @@
 mod shared;
+mod physics;
 mod network;
 mod utils;
 mod components;
@@ -9,10 +10,6 @@ use renet_netcode::NetcodeServerTransport;
 
 use std::time::Duration;
 use std::collections::HashMap;
-
-fn physobj(pos: Vec3, size: Vec3) -> PhysicsObject {
-    PhysicsObject::new(Shape::Obb(Obb::from_pos_size(pos, size)))
-}
 
 struct Server {
     shared: Shared,
@@ -59,7 +56,7 @@ impl Server {
     async fn get_random_spawn(&self) -> Vec3 {
         let mut spawn_points = Vec::new();
 
-        for (id, (pos, props)) in self.shared.ecs.query::<(&PointObject, &Properties)>().iter() {
+        for (_id, (pos, props)) in self.shared.ecs.query::<(&PointObject, &Properties)>().iter() {
             if let Some(spawn) = props.spawn {
                 if spawn {
                     spawn_points.push(pos.0);
@@ -75,21 +72,25 @@ impl Server {
             for z in 0..2 {
                 let x = (x * 2 - 1) as f32;
                 let z = (z * 2 - 1) as f32;
-                self.shared.ecs.spawn((
-                    physobj(
+                self.shared.ecs.spawn({
+                    let (rig, col) = self.shared.physics.spawn_cube(
                         target + vec3(x / 2.0, 0.0, z / 2.0),
                         vec3(0.5, 0.5, 0.5)
-                    ).vel(vec3(x, 10.0, z)),
-                ));
+                    );
+                    self.shared.physics.get_rig_mut(rig).set_linvel(vector![x, 0.0, z], false);
+                    (rig, col)
+                });
             }
         }
 
-        self.shared.ecs.spawn((
-            physobj(
+        self.shared.ecs.spawn({
+            let (rig, col) = self.shared.physics.spawn_cube(
                 target + vec3(0.0, 1.0, 0.0),
                 vec3(0.5, 0.5, 0.5)
-            ).vel(vec3(0.0, 10.0, 0.0)),
-        ));
+            );
+            self.shared.physics.get_rig_mut(rig).set_linvel(vector![0.0, 10.0, 0.0], false);
+            (rig, col)
+        });
     }
 
     async fn handle_msg(&mut self, cli_id: ClientId, msg: ClientMessage) {
@@ -101,25 +102,25 @@ impl Server {
                     player.moves = state;
                     player.moves.jump = jumping || player.moves.jump;
                 }
-            },
+            }
             ClientMessage::SetYaw(yaw) => {
-                if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(id) {
-                    obj.set_yaw(yaw);
-                }
+                todo!()
+                // if let Ok(mut obj) = self.shared.ecs.get::<&mut PhysicsObject>(id) {
+                //     obj.set_yaw(yaw);
+                // }
             }
             ClientMessage::Shot(shot_id) => {
                 if let Some(target) = {
-
-                    if let Ok((obj, player)) = self.shared.ecs.query_one_mut::<(&mut PhysicsObject, &mut Player)>(shot_id) {
+                    if let Ok((handle, player)) = self.shared.ecs.query_one_mut::<(&RigidBodyHandle, &mut Player)>(shot_id) {
                         player.hurt(20);
                         if player.dead() {
-                            let old_pos = obj.pos();
-                            obj.set_pos(vec3(0.0, 60.0, 0.0));
+                            let obj = self.shared.physics.get_rig_mut(*handle);
+                            let old_pos = conv_vec_2(*obj.translation());
+                            obj.set_translation(vector![0.0, 60.0, 0.0], true);
                             player.reset_hp();
                             Some(old_pos)
                         } else { None }
                     } else { None }
-
                 } {
                     self.spawn_gibs(target);
                 }
@@ -138,21 +139,26 @@ impl Server {
                     self.server.send_message(client_id, DefaultChannel::ReliableUnordered, serialize(
                         vec![
                             ServerMessage::AssignId({
+                                let (rig_handle, col_handle) = self.shared.physics.spawn_cube(
+                                    self.get_random_spawn().await,
+                                    vec3(1.0, 2.0, 1.0)
+                                );
                                 let id = self.shared.ecs.spawn((
                                     Player::new(),
-                                    physobj(
-                                        self.get_random_spawn().await,
-                                        vec3(1.0, 2.0, 1.0)
-                                    ),
+                                    rig_handle,
+                                    col_handle,
                                 ));
                                 self.client_ids.insert(client_id, id);
                                 id
                             }),
                             ServerMessage::Ecs(Columns {
-                                PhysicsObject: clone_column!(self, &PhysicsObject),
                                 MeshWrapper: clone_column!(self, &MeshWrapper),
                                 ..Columns::default()
                             }),
+                            ServerMessage::PhysicsState(
+                                self.shared.physics.state.rigid_body_set.clone(),
+                                self.shared.physics.state.collider_set.clone()
+                            )
                         ]
                     ).unwrap());
                 },
@@ -181,13 +187,12 @@ impl Server {
             self.server.send_message(*client, DefaultChannel::Unreliable, serialize(
                 vec![
                     ServerMessage::Ecs(Columns {
-                        PhysicsObject: self.shared.ecs.query::<&PhysicsObject>().iter()
-                            .filter(|(_, obj)| !obj.fixed)
-                            .map(|(id, obj)| (id, obj.clone()))
-                            .collect(),
                         Player: clone_column!(self, &Player),
+                        RigidBodyHandle: clone_column!(self, &RigidBodyHandle),
+                        ColliderHandle: clone_column!(self, &ColliderHandle),
                         ..Columns::default()
                     }),
+                    ServerMessage::PhysicsDiff(self.shared.physics.get_physics_diff())
                 ]
             ).unwrap());
         }
