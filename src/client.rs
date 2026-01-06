@@ -230,10 +230,41 @@ impl Client {
             }
             ServerMessage::PhysicsDiff((rigid_body_updates, collider_updates)) => {
                 for (handle, rig) in rigid_body_updates {
-                    self.shared.physics.get_rig_mut(handle).copy_from(&rig);
+                    if self.shared.physics.state.rigid_body_set.contains(handle) {
+                        self.shared.physics.get_rig_mut(handle).copy_from(&rig);
+                    } else {
+                        let len = self.shared.physics.state.rigid_body_set.len();
+                        let index = handle.0.into_raw_parts().0 as usize;
+                        for new_index in len..=index {
+                            self.shared.physics.state.rigid_body_set.insert(
+                                if new_index == index {
+                                    rig.clone()
+                                } else {
+                                    RigidBodyBuilder::dynamic().build()
+                                }
+                            );
+                        }
+                    }
                 }
+
+                // the same shit again:
+
                 for (handle, col) in collider_updates {
-                    self.shared.physics.get_col_mut(handle).copy_from(&col);
+                    if self.shared.physics.state.collider_set.contains(handle) {
+                        self.shared.physics.get_col_mut(handle).copy_from(&col);
+                    } else {
+                        let len = self.shared.physics.state.collider_set.len();
+                        let index = handle.0.into_raw_parts().0 as usize;
+                        for new_index in len..=index {
+                            self.shared.physics.state.collider_set.insert(
+                                if new_index == index {
+                                    col.clone()
+                                } else {
+                                    ColliderBuilder::ball(0.0).build()
+                                }
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -272,6 +303,8 @@ impl Client {
     }
 
     async fn render(&self) {
+        // rapier3d::geometry::TypedShape;
+
         clear_background(LIGHTGRAY);
 
         // for (id, (obj, _)) in self.shared.ecs.query::<(&PhysicsObject, &Player)>().iter() {
@@ -283,6 +316,22 @@ impl Client {
         for (id, mesh) in self.shared.ecs.query::<&Mesh>().iter() {
             if id != self.player {
                 draw_mesh(mesh);
+            }
+        }
+
+        for (_, col) in self.shared.physics.state.collider_set.iter() {
+            let shape = col.shape().as_typed_shape();
+            match shape {
+                TypedShape::TriMesh(trimesh) => {
+                    for tri in trimesh.triangles() {
+                        draw_line_3d(vec3(tri.a.x, tri.a.y, tri.a.z), vec3(tri.b.x, tri.b.y, tri.b.z), WHITE);
+                        draw_line_3d(vec3(tri.c.x, tri.c.y, tri.c.z), vec3(tri.b.x, tri.b.y, tri.b.z), WHITE);
+                    }
+                }
+                TypedShape::Cuboid(cuboid) => {
+                    draw_cube_wires(conv_vec_2(*col.translation()), conv_vec_2(cuboid.half_extents * 2.0), WHITE);
+                }
+                _ => {}
             }
         }
     

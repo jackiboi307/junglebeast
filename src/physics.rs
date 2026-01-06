@@ -51,36 +51,37 @@ impl Physics {
     }
 
     pub fn get_physics_diff(&self) -> PhysicsDiff {
-        use rapier3d::data::HasModifiedFlag;
+        // use rapier3d::data::HasModifiedFlag;
 
+        // TODO create proper diff
         // TODO move to server?
 
         (
             self.state.rigid_body_set.iter()
-                .filter(|(_, rig)| rig.has_modified_flag())
+                // .filter(|(_, rig)| rig.has_modified_flag())
                 .map(|(handler, rig)| (handler, rig.clone()))
                 .collect::<Vec<_>>(),
             self.state.collider_set.iter()
-                .filter(|(_, col)| col.has_modified_flag())
+                // .filter(|(_, col)| col.has_modified_flag())
                 .map(|(handler, col)| (handler, col.clone()))
                 .collect::<Vec<_>>()
         )
     }
 
     pub fn get_rig(&self, handle: RigidBodyHandle) -> &RigidBody {
-        self.state.rigid_body_set.get(handle).expect("invalid handle")
+        self.state.rigid_body_set.get(handle).expect("invalid rigid body handle")
     }
 
     pub fn get_rig_mut(&mut self, handle: RigidBodyHandle) -> &mut RigidBody {
-        self.state.rigid_body_set.get_mut(handle).expect("invalid handle")
+        self.state.rigid_body_set.get_mut(handle).expect("invalid rigid body handle")
     }
 
     pub fn get_col(&self, handle: ColliderHandle) -> &Collider {
-        self.state.collider_set.get(handle).expect("invalid handle")
+        self.state.collider_set.get(handle).expect("invalid collider handle")
     }
 
     pub fn get_col_mut(&mut self, handle: ColliderHandle) -> &mut Collider {
-        self.state.collider_set.get_mut(handle).expect("invalid handle")
+        self.state.collider_set.get_mut(handle).expect("invalid collider handle")
     }
 }
 

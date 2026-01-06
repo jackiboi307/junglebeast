@@ -146,6 +146,28 @@ impl Shared {
             .map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
             .flatten().collect();
 
+        // create collider
+        // the handler is not added to the ecs
+
+        self.physics.state.collider_set.insert(
+            ColliderBuilder::trimesh(
+                vertices
+                    .clone()
+                    .iter()
+                    .map(|v| Point::new(v.position.x, v.position.y, v.position.z))
+                    .collect::<Vec<_>>(),
+                indices
+                    .chunks(3)
+                    .map(|i| [i[0], i[1], i[2]])
+                    .collect::<Vec<_>>()
+            )
+            .unwrap()
+            .restitution(0.5)
+            .build()
+        );
+
+        // added to the ecs:
+
         (
             MeshWrapper {
                 vertices: vertices.iter().map(|v| VertexWrapper {
@@ -161,13 +183,6 @@ impl Shared {
                     bytes: texture.pixels,
                 }),
             },
-
-            // PhysicsObject::new(Shape::Obb(Obb::from_points(
-            //     &vertices.iter().map(|v| {
-            //         let p = v.position;
-            //         Point::new(p.x, p.y, p.z)
-            //     }).collect::<Vec<Point<f32>>>()
-            // ))).fixed(),
         )
     }
 
